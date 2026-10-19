@@ -1,0 +1,102 @@
+name: mayak-agent-platform
+services:
+  db:
+    image: postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416
+    environment:
+      POSTGRES_USER: mayak
+      POSTGRES_PASSWORD: local-fictional-demo
+      POSTGRES_DB: mayak
+    volumes:
+      - data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mayak -d mayak"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  platform:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://mayak:local-fictional-demo@db:5432/mayak
+      PLATFORM_URL: http://platform:8080
+      AGENT_URLS: '{"client-brief":"http://client-brief:8000","commercial-proposal":"http://commercial-proposal:8000"}'
+      LLM_MODE: ${LLM_MODE:-demo}
+      AUTH_MODE: ${AUTH_MODE:-demo}
+      PERSON_TOKENS: ${PERSON_TOKENS:-{}}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      INPUT_PRICE_PER_MILLION: ${INPUT_PRICE_PER_MILLION:-}
+      OUTPUT_PRICE_PER_MILLION: ${OUTPUT_PRICE_PER_MILLION:-}
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    volumes:
+      - ./knowledge:/app/knowledge:ro
+      - ./config:/app/config:ro
+      - ./agents:/app/agents:ro
+      - ./skills:/app/skills:ro
+      - ./processes:/app/processes:ro
+    networks: [database, brief, proposal, gateway]
+    depends_on:
+      db: {condition: service_healthy}
+      client-brief: {condition: service_healthy}
+      commercial-proposal: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  client-brief:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+      args: {AGENT_NAME: client-brief}
+    networks: [brief]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 3s
+      timeout: 4s
+      retries: 15
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  commercial-proposal:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+      args: {AGENT_NAME: commercial-proposal}
+    networks: [proposal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 3s
+      timeout: 4s
+      retries: 15
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  tests:
+    build: .
+    profiles: [test]
+    user: root
+    environment:
+      BASE_URL: http://platform:8080
+      TEST_DATABASE_URL: postgresql://mayak:local-fictional-demo@db:5432/mayak
+      DATABASE_URL: postgresql://mayak:local-fictional-demo@db:5432/mayak
+      PROJECT_ROOT: /app
+      PYTHONPATH: /app
+    networks: [gateway, database]
+    depends_on:
+      platform: {condition: service_healthy}
+    command: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"]
+volumes:
+  data:
+networks:
+  database: {internal: true}
+  brief: {internal: true}
+  proposal: {internal: true}
+  gateway: {}

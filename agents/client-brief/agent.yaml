@@ -1,0 +1,56 @@
+{
+  "name": "client-brief",
+  "version": "0.1.0",
+  "owner": "mark",
+  "description": "Справка о клиенте и подходящие кейсы. Поиск и сборка программой, без вызова модели.",
+  "context": [
+    "clients",
+    "cases"
+  ],
+  "roles": [
+    "ceo",
+    "sales",
+    "delivery"
+  ],
+  "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "client": {
+        "type": "string",
+        "title": "Клиент",
+        "description": "Имя из базы знаний, например Орбита",
+        "minLength": 1,
+        "maxLength": 100,
+        "default": "Орбита"
+      }
+    },
+    "required": [
+      "client"
+    ]
+  },
+  "output": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "markdown": {
+        "type": "string",
+        "maxLength": 50000
+      },
+      "client": {
+        "type": "string"
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "markdown",
+      "client",
+      "sources"
+    ]
+  }
+}

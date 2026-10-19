@@ -1,0 +1,13 @@
+# Отдельный тестовый проект: без ключа модели, без публикации порта,
+# с собственной временной базой. Не меняет работающий пользовательский стек.
+services:
+  platform:
+    environment:
+      LLM_MODE: demo
+      AUTH_MODE: demo
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_MODEL: ""
+      PERSON_TOKENS: "{}"
+      INPUT_PRICE_PER_MILLION: ""
+      OUTPUT_PRICE_PER_MILLION: ""
+    ports: !reset []

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+artifacts/
+*.log
+.DS_Store
+
+# Локальный план координации реализации
+docs/implementation-contract.md

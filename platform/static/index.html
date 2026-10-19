@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f2eb" />
+    <meta
+      name="description"
+      content="Маяк — учебная система работы с AI-агентами. Девять слоёв: от людей и знаний до процессов и решений."
+    />
+    <title>Маяк · Система работы</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">К содержимому</a>
+    <aside class="sidebar" aria-label="Навигация по системе">
+      <a class="brand" href="#overview" aria-label="Маяк — главная"
+        ><span class="brand-symbol" aria-hidden="true">м<span>·</span></span
+        ><span>МАЯК<small>СИСТЕМА РАБОТЫ</small></span></a
+      >
+      <div class="sidebar-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <nav id="navigation" aria-label="Девять слоёв"></nav>
+      <div class="sidebar-footer">
+        <span class="live-dot"></span> Учебная студия<br /><span
+          >Вымышленные люди и данные.<br />Настоящие процессы и проверки.</span
+        >
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb">
+          СТУДИЯ «МАЯК» <span>/</span>
+          <strong id="page-crumb">Обзор системы</strong>
+        </div>
+        <div class="identity">
+          <label for="person-select">Смотреть как</label
+          ><select
+            id="person-select"
+            aria-label="Смотреть как сотрудник"
+            disabled
+          >
+            <option>Загрузка…</option></select
+          ><span id="role-badge" class="badge"></span>
+        </div>
+      </header>
+      <div class="mode-banner" id="mode-banner" role="note">
+        Подключаемся к платформе…
+      </div>
+      <div id="global-error" class="global-error" role="alert" hidden></div>
+      <main id="main" tabindex="-1">
+        <div class="loading-state">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>Открываем рабочее пространство…</p>
+        </div>
+      </main>
+      <footer class="page-footer">
+        <span>Маяк / открытая учебная основа</span
+        ><span>Человек определяет цель и принимает решение.</span>
+      </footer>
+    </div>
+    <div
+      id="announcer"
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <dialog id="token-dialog">
+      <form id="token-form">
+        <div class="eyebrow">ДОСТУП К ПЛАТФОРМЕ</div>
+        <h2>Войти по личному токену</h2>
+        <p>
+          Токен — ваш персональный ключ доступа. Получите его у владельца
+          платформы. Он останется только в памяти этой вкладки.
+        </p>
+        <label class="field-label" for="access-token">Личный токен</label
+        ><input id="access-token" type="password" autocomplete="off" required />
+        <p id="token-error" class="form-error" role="alert"></p>
+        <button class="button primary" type="submit">Войти</button>
+      </form>
+    </dialog>
+  </body>
+</html>

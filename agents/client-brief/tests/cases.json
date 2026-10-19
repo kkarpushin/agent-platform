@@ -1,0 +1,44 @@
+[
+  {
+    "input": {
+      "client": "Орбита"
+    },
+    "expect": {
+      "contains": [
+        "Орбита",
+        "CL01"
+      ],
+      "sources": [
+        "CL01"
+      ]
+    }
+  },
+  {
+    "input": {
+      "client": "Контур"
+    },
+    "expect": {
+      "contains": [
+        "Контур",
+        "CL02"
+      ],
+      "sources": [
+        "CL02"
+      ]
+    }
+  },
+  {
+    "input": {
+      "client": "Форма"
+    },
+    "expect": {
+      "contains": [
+        "Форма",
+        "CL03"
+      ],
+      "sources": [
+        "CL03"
+      ]
+    }
+  }
+]

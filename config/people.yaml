@@ -1,0 +1,20 @@
+- id: anna
+  name: Анна
+  role: ceo
+  position: Руководитель студии
+- id: mark
+  name: Марк
+  role: sales
+  position: Менеджер по продажам
+- id: olga
+  name: Ольга
+  role: delivery
+  position: Руководитель внедрения
+- id: irina
+  name: Ирина
+  role: finance
+  position: Финансовый менеджер
+- id: lev
+  name: Лев
+  role: sales
+  position: Менеджер по развитию
