@@ -9,6 +9,7 @@ const state = {
   page: "",
   render: 0,
   busy: false,
+  commandPreset: null,
 };
 try {
   state.person = localStorage.getItem("mayak-person") || "mark";
@@ -125,8 +126,8 @@ const fieldTitles = {
 };
 const statusTitles = {
   running: "Выполняется",
-  needs_review: "Ждёт решения человека",
-  approved: "Одобрено локально",
+  needs_review: "Ждёт проверки",
+  approved: "Одобрено",
   error: "Ошибка",
 };
 const statusClass = {
@@ -430,17 +431,47 @@ function markdown(text) {
   return box;
 }
 
+const iconPaths = {
+  overview: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M3 14h7v7H3z", "M14 14h7v7h-7z"],
+  people: ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8", "M20 21v-2a4 4 0 0 0-3-3.87", "M16 3.13a4 4 0 0 1 0 7.75"],
+  roles: ["M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z", "m9 12 2 2 4-4"],
+  knowledge: ["M4 3h12l4 4v14H4Z", "M14 3v5h6", "M8 12h8", "M8 16h5"],
+  skills: ["m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"],
+  agents: ["M7 7h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3Z", "M12 3v4", "M9 12v2", "M15 12v2", "M9 17h6", "M1 11v5", "M23 11v5"],
+  tools: ["m14.7 6.3 3 3", "m5 19 5-5", "M14 2a6 6 0 0 0-5 9L2 18a2.8 2.8 0 0 0 4 4l7-7a6 6 0 0 0 9-5l-4 2-4-4Z"],
+  processes: ["M4 3h6v6H4z", "M14 15h6v6h-6z", "M7 9v8a1 1 0 0 0 1 1h6", "M10 6h7v9"],
+  runs: ["M12 3a9 9 0 1 1-6.4 2.6", "M3 3v5h5", "M12 7v5l3 2"],
+  quality: ["M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9", "m9 11 3 3L22 4"],
+};
+function icon(name, cls = "ui-icon") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [key, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", class: cls })) svg.setAttribute(key, value);
+  for (const d of iconPaths[name] || iconPaths.skills) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
 function buildNavigation() {
   const nav = $("#navigation");
   nav.replaceChildren();
-  const home = link("Обзор системы", "#overview", "nav-link");
-  home.prepend(el("span", "nav-number nav-home", "⊙"));
+  const home = link("Рабочее пространство", "#overview", "nav-link");
+  home.prepend(icon("overview"));
   nav.append(home);
-  layers.forEach((layer, i) => {
-    const item = link(layer.title, `#${layer.id}`, "nav-link");
-    item.prepend(el("span", "nav-number", String(i + 1).padStart(2, "0")));
-    nav.append(item);
-  });
+  const groups = [
+    ["РАБОТА", ["skills", "processes", "runs"]],
+    ["УСТРОЙСТВО СИСТЕМЫ", ["people", "roles", "knowledge", "agents", "tools", "quality"]],
+  ];
+  for (const [title, ids] of groups) {
+    nav.append(el("div", "nav-group-label", title));
+    for (const id of ids) {
+      const index = layers.findIndex(layer => layer.id === id);
+      const item = link("", `#${id}`, "nav-link");
+      add(item, icon(id), el("span", "nav-title", layers[index].title), el("span", "nav-number", String(index + 1).padStart(2, "0")));
+      nav.append(item);
+    }
+  }
 }
 function updateHeader() {
   const b = state.bootstrap;
@@ -457,28 +488,14 @@ function updateHeader() {
   $("#role-badge").textContent = roleTitle(b.person.role);
   const banner = $("#mode-banner");
   banner.replaceChildren();
-  if (b.demo)
-    add(
-      banner,
-      el("strong", "", "Учебный режим. "),
-      document.createTextNode(
-        "Переключатель сотрудника демонстрирует права, а не проверяет личность. Все данные вымышлены. ",
-      ),
-    );
-  else
-    add(
-      banner,
-      el("strong", "", "Личный доступ. "),
-      document.createTextNode("Действия доступны в пределах вашей роли. "),
-    );
-  add(
-    banner,
-    document.createTextNode(
-      b.llm_mode === "fixture"
-        ? "Ответы из тестовой фикстуры. Этот режим предназначен только для автоматических проверок."
-        : `Реальная модель через ${cliTitle(b.cli_worker?.provider)}. ${b.cli_worker?.connected ? "Подключение активно." : "Для запуска подключите авторизованный CLI."}`,
-    ),
-  );
+  const worker = b.cli_worker || {};
+  const connection = add(el("span", `connection-status ${worker.connected ? "connected" : ""}`), el("span", "live-dot"), document.createTextNode(b.llm_mode === "fixture" ? "Тестовые ответы" : worker.connected ? `${cliTitle(worker.provider)} подключён` : "Модель не подключена"));
+  const disclosure = el("details", "mode-details");
+  add(disclosure, el("summary", "", b.demo ? "Учебное пространство" : "Личный доступ"),
+    el("p", "", b.demo ? "Здесь вымышленные люди и данные. Переключатель сотрудника показывает его права, но не проверяет личность." : "Действия доступны в пределах вашей роли."),
+    el("p", "", b.llm_mode === "fixture" ? "Ответы из тестовой фикстуры. Этот режим используется только для автоматических проверок." : worker.connected ? "Работу выполняет настоящая модель через ваш авторизованный CLI. Детали каждого обращения сохраняются в запуске." : "Для запуска модели подключите авторизованный Claude Code или Codex по инструкции в README."));
+  add(banner, connection, disclosure);
+
 }
 async function init() {
   clearError();
@@ -525,8 +542,8 @@ async function renderRoute() {
       (state.page === "run" && item.id === "runs") ||
       (state.page === "agent" && item.id === "agents"),
   );
-  $("#page-crumb").textContent = layer?.title || "Обзор системы";
-  document.title = `${layer?.title || "Обзор системы"} · Маяк`;
+  $("#page-crumb").textContent = layer?.title || "Рабочее пространство";
+  document.title = `${layer?.title || "Рабочее пространство"} · Маяк`;
   for (const item of document.querySelectorAll(".nav-link")) {
     const active = item.hash === `#${layer?.id || "overview"}`;
     item.classList.toggle("active", active);
@@ -582,7 +599,12 @@ async function renderRoute() {
     }
     if (sequence !== state.render) return;
     main.replaceChildren(pageNode);
-    announce(`${layer?.title || "Обзор системы"} загружено`);
+    main.dataset.page = state.page;
+    if (state.page === "overview" && state.commandPreset) {
+      $("#system-request")?.focus({ preventScroll: true });
+      state.commandPreset = null;
+    }
+    announce(`${layer?.title || "Рабочее пространство"} загружено`);
   } catch (error) {
     if (sequence !== state.render) return;
     showError(error);
@@ -621,7 +643,7 @@ function workspaceSummary(workspace) {
   root.setAttribute("aria-label", "Что требует внимания");
   const stats = [
     [workspace.attention.unprocessed_events ?? workspace.inbox.filter(item => item.status === "new").length, "Новые сообщения", "Нужно разобрать", "↗"],
-    [workspace.attention.pending_approvals ?? 0, "Ждут решения по задачам", "Проверить точную версию", "◇"],
+    [workspace.attention.pending_approvals ?? 0, "Ждут решения Анны", "Предложения по задачам", "◇"],
     [workspace.attention.blocked_tasks ?? workspace.tasks.filter(taskBlocked).length, "Задачи с препятствием", "Помочь исполнителю", "!"],
     [workspace.tasks.filter(task => !taskDone(task)).length, "Открытые задачи", `${workspace.projects.length} проекта в работе`, "◎"],
   ];
@@ -723,10 +745,21 @@ function taskProposal(run) {
   return panel;
 }
 
+const skillExamples = {
+  "explain-process": "Объясни, как устроена работа по проекту «Орбита»: кто за что отвечает, что уже готово, что мешает и кто принимает решение о запуске.",
+  "meeting-actions": "Итоги встречи по проекту «Орбита»: макеты приняты. Марк собирает недостающие тексты у клиента. Ольга начнёт сборку после получения текстов. Дату запуска нужно согласовать с Анной. Выдели предлагаемые действия, ответственных и открытые вопросы.",
+  "daily-brief": "Подготовь сводку по проектам «Орбита» и «Контур»: текущее состояние, что требует внимания, кто отвечает и какие решения нужны от руководителя.",
+};
+function useSkill(skill) {
+  if (state.busy) return;
+  state.commandPreset = { skill: skill.name, request: skillExamples[skill.name] || "" };
+  if (location.hash === "#overview") renderRoute();
+  else location.hash = "overview";
+}
 function commandPanel() {
   const panel = el("section", "panel command-panel");
   panel.id = "system-command";
-  add(panel, el("div", "eyebrow", "ОДНО ПОРУЧЕНИЕ · ВАШИ ЗНАНИЯ И СПОСОБЫ РАБОТЫ"), el("h2", "", "Поручение системе"), el("p", "", "Опишите нужный результат. Помощник найдёт подходящий сохранённый способ работы, подготовит ответ с основаниями или предложит следующий процесс."));
+  add(panel, add(el("div", "composer-heading"), add(el("span", "composer-symbol"), icon("skills")), el("h2", "", "Что сделаем сегодня?")), el("p", "", "Задайте вопрос или поручите работу. Помощник использует доступные вам знания и сохранённые способы работы."));
   const agent = state.bootstrap.agents.find(item => item.name === "work-assistant");
   if (!agent?.allowed) {
     add(panel, el("p", "field-hint spaced", "Эта роль не может давать поручения помощнику. Доступные части системы показаны ниже."));
@@ -741,13 +774,13 @@ function commandPanel() {
   input.required = true;
   input.minLength = 5;
   input.maxLength = 10000;
-  input.placeholder = "Например: что мешает запуску проекта «Орбита» и какие решения сейчас нужны от меня?";
+  input.placeholder = "Например: кто утверждает срок проекта «Орбита» и что нужно для решения?";
   const examples = el("div", "command-examples");
-  for (const [title, request] of [
-    ["Разобраться в проекте", "Что мешает запуску проекта «Орбита» и какие решения сейчас нужны от руководителя?"],
-    ["Подготовиться к встрече", "Подготовь короткую повестку встречи по проекту «Контур»: что известно, что уточнить и кто может помочь."],
-    ["Разобрать входящее", "Хочу разобрать входящее сообщение E001 и понять, нужно ли создать задачу. Предложи следующий шаг."],
-  ]) examples.append(button(title, () => { input.value = request; input.focus(); }, "command-example"));
+  for (const [title, name] of [["Разобраться в проекте", "explain-process"], ["Итоги встречи", "meeting-actions"], ["Сводка по проектам", "daily-brief"]]) {
+    const available = state.bootstrap.skills.some(skill => skill.name === name && skill.execution === "draft" && (skill.roles || []).includes(state.bootstrap.person.role));
+    if (!available) continue;
+    examples.append(button(title, () => { input.value = skillExamples[name]; skillSelect.value = name; skillChoice.open = true; input.focus(); }, "command-example"));
+  }
   const skillChoice = el("details", "command-skill-choice");
   const skillLabel = el("label", "field-label", "Сохранённый способ работы");
   skillLabel.htmlFor = "system-skill";
@@ -761,13 +794,18 @@ function commandPanel() {
     option.value = skill.name;
     skillSelect.append(option);
   }
-  add(skillChoice, el("summary", "", "Выбрать способ работы вручную"), skillLabel, skillSelect);
+  add(skillChoice, el("summary", "", "Способ работы: автоматически или вручную"), skillLabel, skillSelect);
+  if (state.commandPreset && [...skillSelect.options].some(option => option.value === state.commandPreset.skill)) {
+    input.value = state.commandPreset.request;
+    skillSelect.value = state.commandPreset.skill;
+    skillChoice.open = true;
+  }
   const error = el("p", "form-error");
   error.setAttribute("role", "alert");
-  const submit = button("Передать системе ↗", null, "primary");
+  const submit = button("Выполнить поручение", null, "primary");
   submit.type = "submit";
   submit.id = "system-submit";
-  add(form, label, input, examples, skillChoice, error, add(el("div", "form-actions"), submit, el("span", "field-hint", "Подготовка ответа не меняет задачи и не отправляет сообщения.")));
+  add(form, label, input, examples, skillChoice, error, add(el("div", "form-actions"), submit, el("span", "field-hint", "Ответ и источники сохранятся в журнале. Изменения задач согласуются отдельно.")));
   let requestId = null;
   let previous = null;
   form.addEventListener("submit", async event => {
@@ -788,7 +826,7 @@ function commandPanel() {
       const run = await api("/api/runs", { method: "POST", body: JSON.stringify({ agent: "work-assistant", input: inputData, request_id: requestId }) });
       location.hash = `run/${encodeURIComponent(run.id)}`;
     } catch (err) { error.textContent = err.message; }
-    finally { state.busy = false; $("#person-select").disabled = !state.bootstrap.demo; submit.disabled = false; submit.textContent = "Передать системе ↗"; }
+    finally { state.busy = false; $("#person-select").disabled = !state.bootstrap.demo; submit.disabled = false; submit.textContent = "Выполнить поручение"; }
   });
   add(panel, form);
   return panel;
@@ -822,98 +860,44 @@ function assistantRoute(run) {
   return panel;
 }
 
+function quickAction(title, copy, route, symbol) {
+  const card = link("", route, "quick-action");
+  add(card, add(el("span", "quick-action-icon"), icon(symbol)), add(el("span", "quick-action-copy"), el("strong", "", title), el("span", "", copy)), el("span", "action-arrow", "↗"));
+  return card;
+}
 async function overviewPage() {
   const workspace = await workspaceData();
-  const root = el("div");
+  const root = el("div", "overview-page");
   const b = state.bootstrap;
-  const hero = el("section", "hero");
-  const copy = el("div", "hero-copy");
-  const title = el("h1");
-  add(
-    title,
-    document.createTextNode("Рабочая AI-система."),
-    el("br"),
-    el("em", "", "Растёт вместе с вами."),
-  );
-  add(
-    copy,
-    el("div", "eyebrow", "ДЕВЯТЬ СЛОЁВ · ОДНО РАБОЧЕЕ ПРОСТРАНСТВО"),
-    title,
-    el(
-      "p",
-      "",
-      "Люди, знания, скиллы и агенты работают в одном пространстве. Дайте поручение, проверьте основания и развивайте систему под свои процессы.",
-    ),
-    add(
-      el("div", "hero-actions"),
-      link("Посмотреть пример процесса ↗", "#processes", "button primary"),
-      el("span", "hero-caption", "Девять слоёв для разных рабочих задач"),
-    ),
-  );
-  const orbit = el("div", "system-orbit");
-  orbit.setAttribute("aria-hidden", "true");
-  add(
-    orbit,
-    el("div", "orbit-ring"),
-    el("div", "orbit-ring inner"),
-    add(
-      el("div", "orbit-core"),
-      el("strong", "", "м."),
-      el("small", "", "МАЯК"),
-    ),
-    el("div", "orbit-node n1", "Люди и цель"),
-    el("div", "orbit-node n2", "Знания и действия"),
-    el("div", "orbit-node n3", "Процесс и состояние"),
-    el("div", "orbit-node n4", "Решение человека"),
-  );
-  add(hero, copy, orbit);
-  root.append(hero);
-  root.append(commandPanel());
-  if (workspace) root.append(el("p", "example-caption", "Учебный процесс: помощник руководителя · сообщения, задачи и решения"));
-  root.append(workspaceSummary(workspace));
-  const counts = [
-    `Сотрудников в обзоре: ${b.people.length}`,
-    `Ролей с разными полномочиями: ${Object.keys(b.roles).length}`,
-    `Доступных записей: ${b.sections.reduce((sum, section) => sum + section.count, 0)}`,
-    `Сохранённых способов работы: ${b.skills.length}`,
-    `Независимых агентов: ${b.agents.length}`,
-    `Модель: ${cliTitle(b.cli_worker?.provider)}`,
-    "От запроса до согласования",
-    "Журнал и версии результатов",
-    "Решения и подтверждённые уроки",
-  ];
-  add(
-    root,
-    sectionHeading("Карта системы", "Каждый слой отвечает на свой вопрос"),
-  );
+  const intro = add(el("div", "desk-heading"), add(el("div"), el("div", "eyebrow", "ЛЮДИ + АГЕНТЫ · ОБЩАЯ РАБОТА"), el("h1", "", "Рабочее пространство"), el("p", "", "Поручайте работу, используйте знания команды и принимайте решения в одном месте.")), link("Команда и цели", "#people", "button small"));
+  root.append(intro);
+  const actions = add(el("aside", "desk-actions"), el("div", "eyebrow", "ГОТОВО К РАБОТЕ"));
+  if (b.agents.some(agent => agent.name === "task-intake" && agent.allowed)) actions.append(quickAction("Разобрать входящие", "Превратить сообщение в предложение задачи", "#processes", "processes"));
+  if (b.agents.some(agent => agent.name === "daily-brief" && agent.allowed)) actions.append(quickAction("Собрать сводку", "Увидеть состояние проектов и открытые вопросы", "#agent/daily-brief", "runs"));
+  actions.append(quickAction("Посмотреть скиллы", "Выбрать готовый способ работы", "#skills", "skills"));
+  add(actions, add(el("div", "desk-note"), el("strong", "", "Вы определяете границы"), el("p", "", "Агенты работают с доступными вам знаниями. Предложения по задачам проверяет и утверждает Анна.")));
+  add(root, add(el("div", "desk-grid"), commandPanel(), actions));
+  if (workspace) {
+    add(root, sectionHeading("Работа команды", "Текущее состояние проектов"), workspaceSummary(workspace));
+    const projects = el("div", "project-grid");
+    for (const project of workspace.projects) {
+      const id = project.id || project.data?.project_id;
+      const tasks = workspace.tasks.filter(task => task.project_id === id);
+      const active = tasks.filter(task => !taskDone(task)).length;
+      const card = add(el("article", "project-card"), add(el("div", "card-top"), add(el("div", "project-heading"), el("span", "project-monogram", (project.data?.name || project.title || "П").slice(0, 1)), add(el("div"), el("h3", "", project.data?.name || project.title), el("p", "", project.title))), badge(project.data?.status || "Проект", "neutral")), add(el("div", "project-meta"), el("span", "", `Координатор: ${personName(project.data?.coordinator || project.owner)}`), el("span", "", `Открытых задач: ${active}`)), link("Открыть входящие и задачи →", "#processes", "button text"));
+      projects.append(card);
+    }
+    root.append(projects);
+  } else root.append(workspaceSummary(workspace));
+  const counts = [`${b.people.length} сотрудников`, `${Object.keys(b.roles).length} роли`, `${b.sections.reduce((sum, section) => sum + section.count, 0)} доступных записей`, `${b.skills.length} способов работы`, `${b.agents.length} агента`, "Разрешённые действия", "Входящие и задачи", "Результаты и история", "Решения и улучшения"];
+  add(root, sectionHeading("Девять слоёв вашей системы", "Откройте слой, чтобы увидеть, как он устроен"));
   const grid = el("div", "layer-grid");
   layers.forEach((layer, i) => {
     const card = link("", `#${layer.id}`, "layer-card");
-    add(
-      card,
-      add(
-        el("div", "layer-top"),
-        el("span", "layer-index", String(i + 1).padStart(2, "0")),
-        el("span", "layer-icon", layer.icon),
-      ),
-      el("h3", "", layer.title),
-      el("p", "", layer.description),
-      add(
-        el("div", "layer-meta"),
-        el("span", "", counts[i]),
-        el("span", "", "↗"),
-      ),
-    );
+    add(card, add(el("div", "layer-top"), el("span", "layer-index", String(i + 1).padStart(2, "0")), icon(layer.id, "ui-icon layer-icon")), el("h3", "", layer.title), el("p", "", layer.description), add(el("div", "layer-meta"), el("span", "", counts[i]), el("span", "", "↗")));
     grid.append(card);
   });
   root.append(grid);
-  add(
-    root,
-    definition(
-      "Начните с вопроса «зачем?».",
-      "Затем определите людей, знания, исполнителей и шаги. Автоматизация полезна, когда у результата есть владелец и понятный способ проверки.",
-    ),
-  );
   return root;
 }
 function peoplePage() {
@@ -923,7 +907,7 @@ function peoplePage() {
   add(
     root,
     heading(
-      "Работа начинается с людей",
+      "Команда и цели",
       "У процесса есть цель и человек, который отвечает за результат. AI помогает выполнить работу в заданных границах.",
       1,
     ),
@@ -993,7 +977,7 @@ function rolesPage() {
   add(
     root,
     heading(
-      "Полномочия видны заранее",
+      "Роли и полномочия",
       "Роль определяет доступ к сведениям, запуску агентов и согласованию. Проверка выполняется платформой при каждом запросе.",
       2,
     ),
@@ -1099,8 +1083,8 @@ async function knowledgePage() {
   add(
     root,
     heading(
-      "Сначала источник. Потом ответ.",
-      "Знания хранятся в Markdown-файлах — обычных текстовых документах. После синхронизации платформа ищет по доступным вам записям.",
+      "Знания команды",
+      "Проекты, правила и другие сведения, которыми пользуются люди и агенты. Ваша роль определяет, какие записи доступны.",
       3,
       actions,
     ),
@@ -1210,17 +1194,20 @@ function skillsPage() {
   add(
     root,
     heading(
-      "Способ работы можно сохранить",
-      "Скилл — повторно используемая инструкция. Он описывает, как выполнять определённую часть работы и что проверять.",
+      "Скиллы команды",
+      "Скилл — сохранённый способ работы. Выберите готовый скилл, откройте пример поручения и получите результат по знаниям команды.",
       4,
     ),
   );
-  const grid = el("div", "grid-two");
-  for (const skill of state.bootstrap.skills) {
-    const card = el("section", "panel");
+  const grid = el("div", "grid-two skill-grid");
+  const skillOrder = ["explain-process", "meeting-actions", "daily-brief"];
+  const orderedSkills = [...state.bootstrap.skills].sort((a, b) => (skillOrder.includes(a.name) ? skillOrder.indexOf(a.name) : 10) - (skillOrder.includes(b.name) ? skillOrder.indexOf(b.name) : 10));
+  for (const skill of orderedSkills) {
+    const card = el("section", "panel skill-card");
+    card.dataset.skill = skill.name;
     add(
       card,
-      el("div", "eyebrow", "СОХРАНЁННЫЙ СПОСОБ РАБОТЫ"),
+      add(el("div", "skill-card-top"), add(el("span", "skill-card-icon"), icon("skills")), badge(skill.execution === "draft" ? "Готов к запуску" : "Инструкция процесса", skill.execution === "draft" ? "" : "neutral")),
       el("h3", "", skill.title || skillTitles[skill.name] || skill.name),
       el("p", "", skill.description),
     );
@@ -1237,7 +1224,13 @@ function skillsPage() {
           : "Инструкция для человека. Автоматический вызов агентом не настроен.",
       ),
     );
-    if (skill.execution === "draft") add(card, badge((skill.roles || []).includes(state.bootstrap.person.role) ? "Можно выбрать поручением" : "Выбор ограничен ролью", "neutral"), el("p", "field-hint", "Готовит ответ по разрешённым знаниям. Самостоятельно не меняет задачи и не подключает сервисы."));
+    const canUse = skill.execution === "draft" && (skill.roles || []).includes(state.bootstrap.person.role) && state.bootstrap.agents.some(agent => agent.name === "work-assistant" && agent.allowed);
+    if (canUse) {
+      const use = button("Использовать", () => useSkill(skill), "primary");
+      use.dataset.useSkill = skill.name;
+      card.append(add(el("div", "skill-action"), use, el("span", "field-hint", "Откроется пример поручения")));
+    } else if (skill.execution === "draft") card.append(badge("Запуск недоступен вашей роли", "neutral"));
+    else if (skill.name === "task-intake" && boundAgents.some(agent => agent.allowed)) card.append(link("Открыть входящие →", "#processes", "button"));
     if (skill.context?.length) card.append(chipList(skill.context, section => sectionTitles[section] || section));
     if (skill.content) {
       const method = el("details", "record spaced");
@@ -1252,7 +1245,7 @@ function skillsPage() {
       );
       card.append(method);
     }
-    if (skill.path) card.append(el("p", "code-label", skill.path));
+
     grid.append(card);
   }
   if (!state.bootstrap.skills.length)
@@ -1290,12 +1283,17 @@ function skillsPage() {
   );
   return root;
 }
+const agentContracts = {
+  "work-assistant": { input: "Ваш вопрос или поручение", output: "Ответ, источники и предложенный следующий шаг" },
+  "task-intake": { input: "Сообщение из входящих", output: "Предложение: создать задачу, обновить её или уточнить у человека" },
+  "daily-brief": { input: "Один проект или вся команда", output: "Сводка: состояние, препятствия, вопросы и следующие действия" },
+};
 function agentsPage() {
   const root = el("div");
   add(
     root,
     heading(
-      "Каждому исполнителю — ясная задача",
+      "Агенты и модели",
       "Агент — отдельная программа. Он получает входные данные, использует разрешённые инструменты и возвращает результат согласованного формата.",
       5,
     ),
@@ -1324,7 +1322,7 @@ function agentsPage() {
           el("div"),
           el("strong", "", "ВХОД"),
           document.createTextNode(
-            Object.keys(agent.input.properties || {})
+            agentContracts[agent.name]?.input || Object.keys(agent.input.properties || {})
               .map((key) => fieldTitles[key] || key)
               .join(", "),
           ),
@@ -1333,7 +1331,7 @@ function agentsPage() {
           el("div"),
           el("strong", "", "ВЫХОД"),
           document.createTextNode(
-            Object.keys(agent.output.properties || {})
+            agentContracts[agent.name]?.output || Object.keys(agent.output.properties || {})
               .map((key) => fieldTitles[key] || key)
               .join(", "),
           ),
@@ -1753,16 +1751,12 @@ function toolsPage() {
 async function processesPage() {
   const [workspace, runs] = await Promise.all([workspaceData(), api("/api/runs")]);
   const root = el("div");
-  add(root, heading("Рабочий день под контролем", "От сообщения к предложению, затем к решению и общей задаче. Откройте сообщение, проверьте результат и проследите, как меняется доска.", 7, [button("Обновить", renderRoute), link("Собрать сводку ↗", "#agent/daily-brief", "button primary")]));
+  add(root, heading("Входящие и задачи", "Откройте сообщение и нажмите «Разобрать сообщение». Агент предложит задачу или уточнение. После одобрения Анны изменение появится на доске.", 7, [button("Обновить", renderRoute), link("Собрать сводку ↗", "#agent/daily-brief", "button primary")]));
   if (!workspace) {
     root.append(empty("Рабочая доска недоступна этой роли", "Откройте доступные вам знания или переключитесь на участника проекта в учебном режиме.", link("Знания", "#knowledge", "button")));
     return root;
   }
   root.append(workspaceSummary(workspace));
-  const flow = el("div", "process-flow compact-flow");
-  const steps = [["Сообщение", "Вход из переписки или встречи."], ["Основания", "Проект, правила, решения и задачи."], ["Предложение", "Создать, обновить, уточнить или пропустить."], ["Решение", "Анна одобряет точную версию."], ["Контроль", "Задача и история меняются вместе."]];
-  steps.forEach(([title, copy], i) => add(flow, add(el("div", "process-step"), el("small", "", String(i + 1).padStart(2, "0")), el("h3", "", title), el("p", "", copy))));
-  root.append(flow);
   const inbox = el("section", "panel workspace-inbox");
   inbox.id = "inbox";
   add(inbox, sectionHeading("Входящие", "Учебные сообщения и итоги встреч"));
@@ -1770,7 +1764,7 @@ async function processesPage() {
   for (const message of workspace.inbox) inbox.append(inboxCard(message, workspace));
   const decisions = el("section", "panel decision-queue");
   decisions.id = "decision-queue";
-  add(decisions, sectionHeading("Ждут решения", "Точная версия, а не весь процесс"));
+  add(decisions, sectionHeading("Ждут решения Анны", "Предложения по задачам"));
   const pending = (runs.runs || []).filter(run => run.agent === "task-intake" && run.status === "needs_review");
   if (!pending.length) decisions.append(empty("Очередь решений пуста", "После разбора сообщения здесь появится результат для проверки."));
   for (const run of pending) add(decisions, add(el("div", "decision-item"), add(el("div"), el("h3", "", titleForAgent(run.agent)), el("p", "muted", `${personName(run.person_id)} · версия ${run.current_version} · ${formatDate(run.created_at)}`)), link("Проверить →", `#run/${encodeURIComponent(run.id)}`, "button")));
@@ -2067,7 +2061,8 @@ async function runPage(id) {
       metrics,
       add(el("div", "metric"), el("small", "", label), el("strong", "", value)),
     );
-  root.append(metrics);
+  const executionDetails = el("details", "execution-details panel spaced");
+  add(executionDetails, el("summary", "", "Детали выполнения: время, версия и использование модели"), metrics);
   if (run.source_warnings?.length || run.task_state_stale) {
     const warnings = add(
       el("section", "error-panel"),
@@ -2270,6 +2265,7 @@ async function runPage(id) {
   if (run.status === "approved" && isCEO()) left.append(learningPanel(run));
   add(layout, left, tracePanel(run));
   root.append(layout);
+  root.append(executionDetails);
   return root;
 }
 

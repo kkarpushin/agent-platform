@@ -275,7 +275,13 @@ def load_sources(root: Path) -> tuple[dict, list[dict]]:
         execution = meta.get("execution", "instruction")
         if execution not in {"draft", "instruction"}:
             raise ValueError("Скилл может иметь execution draft или instruction")
-        skills.append({"name": meta["name"], "description": meta["description"], "content": content, "version": hashlib.sha256(path.read_bytes()).hexdigest(), "roles": skill_roles, "context": skill_context, "execution": execution})
+        skill = {"name": meta["name"], "description": meta["description"], "content": content, "version": hashlib.sha256(path.read_bytes()).hexdigest(), "roles": skill_roles, "context": skill_context, "execution": execution}
+        if "title" in meta:
+            title = meta["title"]
+            if not isinstance(title, str) or not title.strip() or len(title.strip()) > 120 or not title.isprintable():
+                raise ValueError("Название скилла title должно быть одной непустой строкой до 120 символов")
+            skill["title"] = title.strip()
+        skills.append(skill)
     skill_names = {s["name"] for s in skills}
     for manifest in agents.values():
         if not isinstance(manifest.get("skills", []), list) or not set(manifest.get("skills", [])) <= skill_names:

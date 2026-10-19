@@ -155,6 +155,31 @@ def test_generic_new_skill_runs_without_core_code_change(system):
     denied=launch(c,person='olga',agent='work-assistant',input={'request':'Проверь план встречи','skill':'meeting-check','project_id':'all'}).json()
     assert denied['status']=='error'
 
+def test_custom_skill_display_title_survives_sync_and_launch(system):
+    c,_,_,root=system
+    previous=c.get('/api/bootstrap').json()['skills']
+    assert all('title' not in skill for skill in previous)
+    directory=root/'skills/meeting-agenda';directory.mkdir()
+    (directory/'SKILL.md').write_text('---\nname: meeting-agenda\ntitle: "  Повестка рабочей встречи  "\ndescription: "Подготовить вопросы для встречи"\nexecution: draft\nroles: [sales, ceo]\ncontext: [projects, rules]\n---\nПодготовь повестку по доступным сведениям.\n')
+    assert c.post('/api/sync',headers={'X-Person':'anna'}).status_code==200
+    skills=c.get('/api/bootstrap').json()['skills']
+    assert next(skill for skill in skills if skill['name']=='meeting-agenda')['title']=='Повестка рабочей встречи'
+    assert [skill for skill in skills if skill['name']!='meeting-agenda']==previous
+    assert 'meeting-agenda' not in {skill['name'] for skill in c.get('/api/bootstrap',headers={'X-Person':'irina'}).json()['skills']}
+    run=launch(c,agent='work-assistant',input={'request':'Подготовь повестку встречи по Орбите','skill':'meeting-agenda','project_id':'P01'}).json()
+    assert run['status']=='needs_review',run
+    assert run['output']['selected_skill']=='meeting-agenda'
+
+@pytest.mark.parametrize('title',[None,42,['Название'],'','   ','Название\nВторая строка','А'*121])
+def test_invalid_skill_display_title_preserves_previous_registry(system,title):
+    c,_,_,root=system
+    previous=c.get('/api/bootstrap').json()['skills']
+    source=root/'skills/explain-process/SKILL.md'
+    source.write_text(source.read_text().replace('name: explain-process\n','name: explain-process\ntitle: '+json.dumps(title,ensure_ascii=False)+'\n',1))
+    response=c.post('/api/sync',headers={'X-Person':'anna'})
+    assert response.status_code==422,response.text
+    assert c.get('/api/bootstrap').json()['skills']==previous
+
 def test_daily_brief_does_not_mutate_shared_tasks(system):
     c,_,_,_=system;before=c.get('/api/workspace').json()['tasks']
     run=launch(c,agent='daily-brief',person='olga').json()
