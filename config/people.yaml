@@ -5,11 +5,11 @@
 - id: mark
   name: Марк
   role: sales
-  position: Менеджер по продажам
+  position: Координатор проектов
 - id: olga
   name: Ольга
   role: delivery
-  position: Руководитель внедрения
+  position: Руководитель исполнения
 - id: irina
   name: Ирина
   role: finance
@@ -17,4 +17,4 @@
 - id: lev
   name: Лев
   role: sales
-  position: Менеджер по развитию
+  position: Координатор проектов

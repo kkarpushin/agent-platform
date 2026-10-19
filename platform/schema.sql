@@ -95,3 +95,31 @@ CREATE TABLE IF NOT EXISTS learnings (
     created_at timestamptz NOT NULL DEFAULT now(),
     FOREIGN KEY(run_id, version) REFERENCES revisions(run_id, version)
 );
+
+-- v0.2 adds state; existing runs and decisions are never deleted.
+CREATE TABLE IF NOT EXISTS inbox (
+ event_id text PRIMARY KEY, project_id text NOT NULL, text text NOT NULL,
+ author text NOT NULL, received_at timestamptz NOT NULL, input_hash text NOT NULL,
+ current_run_id uuid REFERENCES runs(id)
+);
+CREATE TABLE IF NOT EXISTS tasks (
+ id text PRIMARY KEY, project_id text NOT NULL, title text NOT NULL, owner text NOT NULL,
+ status text NOT NULL CHECK(status IN ('todo','in_progress','blocked','done')),
+ due_date date, blocked_by text NOT NULL DEFAULT '', source_refs jsonb NOT NULL DEFAULT '[]',
+ version integer NOT NULL DEFAULT 1, updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS task_history (
+ task_id text NOT NULL REFERENCES tasks(id), version integer NOT NULL,
+ snapshot jsonb NOT NULL, author text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ run_id uuid REFERENCES runs(id), run_version integer,
+ PRIMARY KEY(task_id,version), UNIQUE(run_id,run_version)
+);
+CREATE TABLE IF NOT EXISTS cli_workers (
+ worker_id text PRIMARY KEY, provider text NOT NULL, last_seen timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS cli_jobs (
+ id uuid PRIMARY KEY, call_id bigint NOT NULL REFERENCES model_calls(id), run_id uuid NOT NULL REFERENCES runs(id),
+ request jsonb NOT NULL, status text NOT NULL CHECK(status IN ('queued','claimed','completed','error')),
+ worker_id text, claim_hash text, result jsonb, error text,
+ created_at timestamptz NOT NULL DEFAULT now(), claimed_at timestamptz, finished_at timestamptz
+);

@@ -28,7 +28,7 @@ class Context:
         request = Request(self.url + path, data=body, headers={
             "Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
         try:
-            with urlopen(request, timeout=60) as response:
+            with urlopen(request, timeout=240) as response:
                 return json.load(response)
         except HTTPError as error:
             try:
@@ -43,10 +43,16 @@ class Context:
     def search(self, section, query):
         return self.get(section, query)
 
-    def llm(self, purpose, data, system, prompt, max_tokens=2048):
+    def workspace(self):
+        return self._request("/internal/workspace")
+
+    def skills(self):
+        return self._request("/internal/skills")["skills"]
+
+    def llm(self, purpose, data, system, prompt, max_tokens=2048, response_schema=None, skill_name=None):
         return self._request("/internal/llm", {
             "purpose": purpose, "data": data, "system": system,
-            "prompt": prompt, "max_tokens": max_tokens})["text"]
+            "prompt": prompt, "max_tokens": max_tokens, "response_schema": response_schema, "skill_name": skill_name})["text"]
 
 
 def agent(name):

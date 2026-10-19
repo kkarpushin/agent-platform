@@ -1,0 +1,32 @@
+[
+  {
+    "input": {
+      "project_id": "all"
+    },
+    "expect": {
+      "contains": [
+        "Сводка"
+      ]
+    }
+  },
+  {
+    "input": {
+      "project_id": "P01"
+    },
+    "expect": {
+      "contains": [
+        "Сводка"
+      ]
+    }
+  },
+  {
+    "input": {
+      "project_id": "P02"
+    },
+    "expect": {
+      "contains": [
+        "Сводка"
+      ]
+    }
+  }
+]

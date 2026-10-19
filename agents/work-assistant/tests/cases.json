@@ -1,0 +1,38 @@
+[
+  {
+    "input": {
+      "request": "Объясни процесс работы",
+      "skill": "auto",
+      "project_id": "all"
+    },
+    "expect": {
+      "contains": [
+        "помощника"
+      ]
+    }
+  },
+  {
+    "input": {
+      "request": "Покажи вопросы проекта",
+      "skill": "auto",
+      "project_id": "P01"
+    },
+    "expect": {
+      "contains": [
+        "помощника"
+      ]
+    }
+  },
+  {
+    "input": {
+      "request": "Подготовь план встречи",
+      "skill": "auto",
+      "project_id": "P02"
+    },
+    "expect": {
+      "contains": [
+        "помощника"
+      ]
+    }
+  }
+]

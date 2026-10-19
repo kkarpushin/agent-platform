@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "properties": {
+    "markdown": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "selected_skill": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "maxItems": 50
+    },
+    "suggested_agent": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "task-intake",
+        "daily-brief"
+      ]
+    },
+    "suggested_input": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "missing_capability": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "required": [
+    "markdown",
+    "selected_skill",
+    "source_refs",
+    "suggested_agent",
+    "suggested_input",
+    "missing_capability"
+  ],
+  "additionalProperties": false
+}

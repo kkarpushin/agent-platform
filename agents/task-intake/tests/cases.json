@@ -1,0 +1,26 @@
+[
+  {
+    "input": {
+      "event_id": "E001"
+    },
+    "expect": {
+      "action": "create"
+    }
+  },
+  {
+    "input": {
+      "event_id": "E003"
+    },
+    "expect": {
+      "action": "question"
+    }
+  },
+  {
+    "input": {
+      "event_id": "E005"
+    },
+    "expect": {
+      "action": "create"
+    }
+  }
+]

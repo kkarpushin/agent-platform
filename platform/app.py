@@ -19,7 +19,6 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -38,20 +37,13 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
 LOG = logging.getLogger("agent_platform")
-SECTION_TITLES = {
-    "services": "Услуги и цены", "costs": "Себестоимость", "cases": "Кейсы",
-    "clients": "Клиенты", "templates": "Шаблоны", "technical": "Технические сведения",
-}
+SECTION_TITLES = {"projects": "Проекты", "rules": "Правила работы", "finance": "Внутренние финансы"}
 LAYER_TITLES = [
     "Цели и люди", "Роли и полномочия", "Знания и информация", "Скиллы",
     "Агенты и модели", "Инструменты и доступы", "Процессы", "Запуск и состояние",
     "Проверка и улучшение",
 ]
-PROCESS_STEPS = [
-    "Получить заявку", "Найти разрешённые знания", "Выбрать услуги",
-    "Рассчитать цену программой", "Подготовить предложение", "Проверить результат",
-    "Получить решение человека",
-]
+PROCESS_STEPS = ["Прочитать сообщение", "Найти знания и задачи", "Предложить действие", "Проверить", "Получить решение Анны", "Обновить доску", "Проверить продолжение"]
 
 
 @dataclass
@@ -62,24 +54,22 @@ class Settings:
     agent_urls: dict = field(default_factory=lambda: json.loads(os.getenv("AGENT_URLS", '{}')))
     auth_mode: str = field(default_factory=lambda: os.getenv("AUTH_MODE", "demo"))
     person_tokens: dict = field(default_factory=lambda: json.loads(os.getenv("PERSON_TOKENS", '{}')))
-    llm_mode: str = field(default_factory=lambda: os.getenv("LLM_MODE", "demo"))
-    anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
-    anthropic_model: str = field(default_factory=lambda: os.getenv("ANTHROPIC_MODEL", ""))
-    input_price: str | None = field(default_factory=lambda: os.getenv("INPUT_PRICE_PER_MILLION") or None)
-    output_price: str | None = field(default_factory=lambda: os.getenv("OUTPUT_PRICE_PER_MILLION") or None)
-    agent_timeout: float = field(default_factory=lambda: float(os.getenv("AGENT_TIMEOUT_SECONDS", "180")))
+    llm_mode: str = field(default_factory=lambda: os.getenv("LLM_MODE", "cli"))
+    agent_timeout: float = field(default_factory=lambda: float(os.getenv("AGENT_TIMEOUT_SECONDS", "480")))
+
+    cli_worker_token: str = field(default_factory=lambda: os.getenv("CLI_WORKER_TOKEN", ""))
+    cli_provider: str = field(default_factory=lambda: os.getenv("CLI_PROVIDER", "codex"))
 
     def validate(self):
         self.root = Path(self.root)
         if self.auth_mode not in {"demo", "token"}:
             raise ValueError("AUTH_MODE должен быть demo или token")
-        if self.llm_mode not in {"demo", "anthropic"}:
-            raise ValueError("LLM_MODE должен быть demo или anthropic")
+        if self.llm_mode not in {"cli", "fixture"}:
+            raise ValueError("LLM_MODE должен быть cli; fixture предназначен только для автоматических тестов")
+        if self.cli_provider not in {"claude", "codex"}:
+            raise ValueError("CLI_PROVIDER должен быть claude или codex")
         if self.auth_mode == "token" and not self.person_tokens:
             raise ValueError("В режиме token заполните PERSON_TOKENS")
-        for value in (self.input_price, self.output_price):
-            if value is not None and (not Decimal(value).is_finite() or Decimal(value) < 0):
-                raise ValueError("Цена токенов должна быть конечным неотрицательным числом")
         if not 1 <= self.agent_timeout <= 600:
             raise ValueError("AGENT_TIMEOUT_SECONDS должен быть от 1 до 600")
         if not isinstance(self.agent_urls, dict):
@@ -97,6 +87,8 @@ class StrictBody(BaseModel):
 class RunBody(StrictBody):
     agent: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     input: dict[str, Any]
+    refresh: bool = False
+    retry_reason: str = Field(default="", max_length=2000)
     request_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
@@ -120,6 +112,39 @@ class LLMBody(StrictBody):
     prompt: str = Field(default="", max_length=60000)
     data: dict[str, Any] = Field(default_factory=dict)
     max_tokens: int = Field(default=1024, ge=256, le=4096)
+    response_schema: dict[str, Any] | None = None
+    skill_name: str | None = Field(default=None, max_length=80)
+
+
+class WorkerBody(StrictBody):
+    worker_id: str = Field(min_length=1,max_length=100,pattern=r'^[a-zA-Z0-9._:-]+$')
+    provider: str = Field(pattern=r'^(claude|codex)$')
+
+
+class WorkerResult(StrictBody):
+    text: str = Field(max_length=200000)
+    model: str = Field(max_length=200)
+    provider: str = Field(pattern=r'^(claude|codex)$')
+    input_tokens: int = Field(ge=0,le=10000000)
+    output_tokens: int = Field(ge=0,le=1000000)
+    usage: dict[str,Any] = Field(default_factory=dict)
+    duration_ms: int = Field(ge=0,le=600000)
+    cost_usd: None = None
+
+
+class WorkerCompleteBody(StrictBody):
+    claim_token: str = Field(min_length=20,max_length=200)
+    status: str = Field(pattern=r'^(completed|error)$')
+    result: WorkerResult | None = None
+    error: str | None = Field(default=None,max_length=2000)
+
+
+class InboxBody(StrictBody):
+    event_id: str = Field(min_length=1,max_length=80,pattern=r'^[a-zA-Z0-9._:-]+$')
+    project_id: str = Field(min_length=1,max_length=80)
+    text: str = Field(min_length=1,max_length=20000)
+    author: str = Field(min_length=1,max_length=100)
+    received_at: datetime
 
 
 def normalized_address(address: str) -> str:
@@ -208,6 +233,8 @@ def load_sources(root: Path) -> tuple[dict, list[dict]]:
             raise ValueError(f"Неизвестные роли агента {manifest['name']}")
         if not isinstance(manifest["context"], list):
             raise ValueError(f"context агента {manifest['name']} должен быть списком")
+        if not isinstance(manifest.get("workspace", False), bool):
+            raise ValueError("workspace должен быть true или false: это разрешение читать рабочее состояние")
         for key in ("input", "output"):
             Draft202012Validator.check_schema(manifest[key])
             if manifest[key].get("type") != "object" or manifest[key].get("additionalProperties") is not False:
@@ -241,15 +268,22 @@ def load_sources(root: Path) -> tuple[dict, list[dict]]:
             raise ValueError(f"Некорректный скилл {path.parent.name}")
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", path.parent.name) or meta["name"] != path.parent.name:
             raise ValueError("Имя скилла должно совпадать с его папкой")
-        skills.append({"name": meta["name"], "description": meta["description"], "content": content, "version": hashlib.sha256(path.read_bytes()).hexdigest()})
+        skill_roles = meta.get("roles", list(roles))
+        skill_context = meta.get("context", [])
+        if not isinstance(skill_roles, list) or not set(skill_roles) <= roles.keys() or not isinstance(skill_context, list) or not all(isinstance(x, str) for x in skill_context):
+            raise ValueError("Некорректные роли или разделы скилла")
+        execution = meta.get("execution", "instruction")
+        if execution not in {"draft", "instruction"}:
+            raise ValueError("Скилл может иметь execution draft или instruction")
+        skills.append({"name": meta["name"], "description": meta["description"], "content": content, "version": hashlib.sha256(path.read_bytes()).hexdigest(), "roles": skill_roles, "context": skill_context, "execution": execution})
     skill_names = {s["name"] for s in skills}
     for manifest in agents.values():
         if not isinstance(manifest.get("skills", []), list) or not set(manifest.get("skills", [])) <= skill_names:
             raise ValueError(f"Агент {manifest['name']} объявил отсутствующий скилл")
     goals_path = root / "config/goals.yaml"
     goals = yaml.safe_load(goals_path.read_text(encoding="utf-8")) if goals_path.exists() else {
-        "purpose": "Подготовить обоснованное предложение клиенту и передать решение человеку",
-        "success_criteria": ["Цена рассчитана по источникам", "Доступы соблюдены", "Решение привязано к версии"],
+        "purpose": "Связать поручения, знания, способы работы и проверяемые решения людей",
+        "success_criteria": ["Результат основан на источниках", "Доступы соблюдены", "Решение привязано к версии"],
     }
     process = PROCESS_STEPS
     for path in sorted((root / "processes").glob("*.md")):
@@ -261,32 +295,30 @@ def load_sources(root: Path) -> tuple[dict, list[dict]]:
     return {"roles": roles, "people": people, "agents": agents, "skills": skills, "goals": goals, "process": process}, records
 
 
-def demo_response(body: LLMBody) -> str:
-    if body.purpose not in {"select_services", "draft_proposal"}:
-        raise HTTPException(422, "Для этой операции нет демонстрационного ответа. Добавьте явный пример в demo_response или используйте настроенную модель.")
+def fixture_response(body: LLMBody) -> str:
+    """Explicit deterministic fixtures for isolated tests; never a model fallback."""
     data = body.data
-    if body.purpose == "select_services":
-        task = str(data.get("task", "")).casefold()
-        services = data.get("services", [])
-        selected = []
-        for item in services:
-            service = item.get("data", item)
-            if any(str(keyword).casefold() in task for keyword in service.get("keywords", []) if str(keyword).strip()):
-                selected.append(service["service_id"])
-        return json.dumps({"service_ids": selected}, ensure_ascii=False)
-    client = data.get("client", "Клиент")
-    if isinstance(client, dict):
-        client = client.get("name", client.get("data", {}).get("name", "Клиент"))
-    services = data.get("services", [])
-    lines = ["> Демонстрационный текст: модель не вызывалась. Требуется проверка человеком.", "", f"Для клиента «{client}» подготовлен состав работ по задаче: {data.get('task', '')}", "", "## Предлагаемые работы"]
-    for item in services:
-        lines.append(f"- {item.get('name', item.get('service_id', 'Услуга'))}")
-    cases = data.get("cases", [])
-    if cases:
-        lines += ["", "## Примеры из базы знаний"]
-        lines += [f"- {item.get('title', 'Кейс')} [{item.get('id', '')}]" for item in cases if isinstance(item, dict)]
-    lines += ["", "Вопрос перед началом: кто со стороны клиента предоставит исходные материалы и подтвердит результат?"]
-    return "\n".join(lines)
+    if body.purpose == "select_skill":
+        return json.dumps({"skill": data["skills"][0]["name"]})
+    if body.purpose == "work_assistant":
+        return json.dumps({"markdown": "Учебная проверка рабочего помощника.", "selected_skill": data["skill"], "source_refs": [x["id"] for x in data["sources"]], "suggested_agent": None, "suggested_input": {}, "missing_capability": ""}, ensure_ascii=False)
+    if body.purpose == "daily_brief":
+        return json.dumps({"markdown": "# Сводка руководителя\n\nКонтрольная подстановка для автоматического теста. Задач: " + str(len(data["workspace"]["tasks"])), "source_refs": [x["id"] for x in data["sources"]], "questions": []}, ensure_ascii=False)
+    if body.purpose != "classify_message":
+        raise HTTPException(422, "Для этой операции нет контрольного ответа")
+    event, tasks = data["event"], data["tasks"]
+    project = event["project_id"]
+    existing = next((t for t in tasks if t["id"] == "TASK-E001"), None)
+    out = {"markdown": "Предложение для проверки Анной. Контрольная подстановка теста.", "action": "create", "event_id": event["event_id"], "project_id": project, "task_id": None, "base_version": None, "title": "Получить недостающие тексты Орбиты", "owner": "mark", "status": "blocked", "due_date": None, "blocked_by": "Ждём тексты клиента", "question": "", "source_refs": [project, "R01", "R02"]}
+    if event["event_id"] == "E002":
+        out.update(action="update" if existing else "question", task_id=existing["id"] if existing else None, base_version=existing["version"] if existing else None, status="done", blocked_by="", question="" if existing else "Где задача получения текстов?")
+    elif event["event_id"] == "E003":
+        out.update(action="question", question="Анна, какой срок запуска можно обещать после проверки готовности?", owner=None, title="", blocked_by="")
+    elif event["event_id"] == "E004" and existing:
+        out.update(action="no_action", task_id=existing["id"], base_version=existing["version"], question="", blocked_by="")
+    elif event["event_id"] == "E005":
+        out.update(title="Собрать ещё 8 контрольных вопросов Контура", owner="lev", status="todo", blocked_by="")
+    return json.dumps(out, ensure_ascii=False)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -328,10 +360,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise
                 time.sleep(1)
         sync_sources()
+        seed_workspace()
         # A local restart cannot resume an in-flight HTTP call. Preserve the failed run.
         with db() as connection:
             connection.execute("UPDATE runs SET status='error', error='Платформа перезапущена во время выполнения. Запустите заново с новым идентификатором запроса.', finished_at=now(), duration_ms=(extract(epoch FROM now()-created_at)*1000)::integer WHERE status='running'")
             connection.execute("UPDATE run_tokens SET active=false WHERE active=true")
+            connection.execute("UPDATE cli_jobs SET status='error',error='Платформа перезапущена во время обращения к CLI',finished_at=now() WHERE status IN ('queued','claimed')")
         yield
 
     app = FastAPI(title="Маяк — девять слоёв AI-системы", lifespan=lifespan)
@@ -343,7 +377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Agents can reach this listener over their private Docker network.
         # The local-demo employee switch must NEVER be available to them:
         # otherwise X-Person: anna would bypass every run-token scope check.
-        internal = request.url.path in {"/internal/context", "/internal/llm"}
+        internal = request.url.path in {"/internal/context", "/internal/llm", "/internal/workspace", "/internal/skills"}
         health = request.method == "GET" and request.url.path == "/api/health"
         if not internal and not health:
             try:
@@ -415,7 +449,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["context_events"] = connection.execute("SELECT section,query,records,hidden_count FROM context_events WHERE run_id=%s ORDER BY id", (run_id,)).fetchall()
         result["model_calls"] = connection.execute("SELECT purpose,mode,model,input_tokens,output_tokens,cost_usd,skill_refs,status,usage FROM model_calls WHERE run_id=%s ORDER BY id", (run_id,)).fetchall()
         result["learnings"] = connection.execute("SELECT id,run_id,version,text,author,created_at FROM learnings WHERE run_id=%s ORDER BY id", (run_id,)).fetchall()
+        result["review_feedback"] = row["manifest"].get("_retry_reason", "")
         result["source_warnings"] = source_warnings(connection, run_id)
+        result["task_state_stale"] = task_state_stale(connection,row)
+        result["task_application"] = connection.execute("SELECT task_id,version,run_version FROM task_history WHERE run_id=%s ORDER BY version DESC LIMIT 1", (run_id,)).fetchone()
         return jsonable_encoder(result)
 
     def source_warnings(connection, run_id):
@@ -464,14 +501,223 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(401, "Токен запуска недействителен или истёк")
         return row
 
+    def seed_workspace():
+        """Seed immutable fictional inputs once; a restart never resets task state."""
+        events = yaml.safe_load((settings.root / 'config/inbox.yaml').read_text()) or []
+        initial = yaml.safe_load((settings.root / 'config/tasks.yaml').read_text()) or []
+        with db() as connection:
+            for event in events:
+                connection.execute("INSERT INTO inbox(event_id,project_id,text,author,received_at,input_hash) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(event_id) DO NOTHING", (event['event_id'],event['project_id'],event['text'],event['author'],event['received_at'],canonical_hash(event)))
+            for task in initial:
+                row = connection.execute("INSERT INTO tasks(id,project_id,title,owner,status,due_date,blocked_by,source_refs) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING RETURNING *", (task['id'],task['project_id'],task['title'],task['owner'],task['status'],task['due_date'],task['blocked_by'],Jsonb(task['source_refs']))).fetchone()
+                if row:
+                    connection.execute("INSERT INTO task_history(task_id,version,snapshot,author) VALUES(%s,1,%s,'starter')", (row['id'],Jsonb(jsonable_encoder(row))))
+
+    def workspace_snapshot(connection, role, project_id='all', event_id=None, sections=None):
+        project_context_enabled = sections is None or 'projects' in sections
+        project_context = query_context(connection, role, 'projects') if project_context_enabled else {'records':[], 'hidden_count':0}
+        projects = project_context['records']
+        allowed = {p['data']['project_id'] for p in projects if 'project_id' in p['data']}
+        event = None
+        if event_id:
+            event = connection.execute("SELECT * FROM inbox WHERE event_id=%s AND project_id=ANY(%s)", (event_id,list(allowed))).fetchone()
+            if event:
+                project_id = event['project_id']
+        if project_id != 'all':
+            allowed &= {project_id}
+            projects = [p for p in projects if p['data']['project_id'] in allowed]
+        tasks = connection.execute("SELECT * FROM tasks WHERE project_id=ANY(%s) ORDER BY id", (list(allowed),)).fetchall()
+        # Shared task state is visible to project roles. Private run narratives are not.
+        events = connection.execute("SELECT i.event_id,i.project_id,i.text,i.author,i.received_at,coalesce(r.status,'new') AS status,i.current_run_id AS run_id FROM inbox i LEFT JOIN runs r ON r.id=i.current_run_id WHERE i.project_id=ANY(%s) ORDER BY i.event_id", (list(allowed),)).fetchall()
+        decisions = connection.execute("SELECT h.task_id,h.version,h.author,h.created_at,h.snapshot FROM task_history h JOIN tasks t ON t.id=h.task_id WHERE t.project_id=ANY(%s) ORDER BY h.created_at DESC LIMIT 50", (list(allowed),)).fetchall()
+        return jsonable_encoder({'_project_context':{'enabled':project_context_enabled,'hidden_count':project_context['hidden_count']},'event':event,'project_name':next((p['data']['name'] for p in projects if event and p['data']['project_id']==event['project_id']),''),'projects':projects,'tasks':tasks,'people':config['people'],'inbox':events,'decisions':decisions})
+
+    def validate_output(connection, run_id, manifest, input_data, output):
+        refs = output.get('source_refs', [])
+        rows = connection.execute("SELECT DISTINCT reference->>'id' AS id FROM context_events e CROSS JOIN LATERAL jsonb_array_elements(e.records) reference WHERE run_id=%s", (run_id,)).fetchall()
+        if not set(refs) <= {r['id'] for r in rows}:
+            raise HTTPException(422, 'Результат ссылается на источник, который не был получен в этом запуске')
+        if manifest['name'] != 'task-intake':
+            return
+        snapshot = manifest['_workspace']; event = snapshot['event']
+        if output['event_id'] != event['event_id'] or output['project_id'] != event['project_id']:
+            raise HTTPException(422, 'Агент изменил сообщение или проект')
+        if output['owner'] is not None and output['owner'] not in {p['id'] for p in snapshot['people']}:
+            raise HTTPException(422, 'Неизвестный ответственный')
+        if output['due_date']:
+            try: date.fromisoformat(output['due_date'])
+            except ValueError: raise HTTPException(422, 'Некорректная дата задачи') from None
+        action = output['action']
+        if action in {'create','update'}:
+            if not output['title'].strip() or not output['owner']:
+                raise HTTPException(422, 'Для изменения нужны задача и ответственный')
+            if action == 'create' and (output['task_id'] is not None or output['base_version'] is not None):
+                raise HTTPException(422, 'Новая задача не имеет предыдущей версии')
+            if action == 'update':
+                previous = next((t for t in snapshot['tasks'] if t['id']==output['task_id'] and t['project_id']==event['project_id']),None)
+                if previous is None or previous['version'] != output['base_version']:
+                    raise HTTPException(422, 'Изменение не основано на полученной версии задачи')
+        if action == 'question' and not output['question'].strip():
+            raise HTTPException(422, 'Не сформулирован вопрос человеку')
+
+    def task_state_stale(connection, run):
+        if run['agent']!='task-intake' or run['status']!='needs_review' or not run['current_version']:return False
+        output=connection.execute('SELECT output FROM revisions WHERE run_id=%s AND version=%s',(run['id'],run['current_version'])).fetchone()['output']
+        if output['action']=='create':
+            now=connection.execute('SELECT id,version FROM tasks WHERE project_id=%s ORDER BY id',(output['project_id'],)).fetchall()
+            before=sorted((t['id'],t['version']) for t in run['manifest']['_workspace']['tasks'])
+            return [(t['id'],t['version']) for t in now]!=before
+        if output['action']=='update':
+            task=connection.execute('SELECT version FROM tasks WHERE id=%s',(output['task_id'],)).fetchone()
+            return task is None or task['version']!=output['base_version']
+        return False
+
+    def apply_task_change(connection, run, version, current):
+        if run['agent'] != 'task-intake':
+            return
+        output = connection.execute('SELECT output FROM revisions WHERE run_id=%s AND version=%s',(run['id'],version)).fetchone()['output']
+        validate_output(connection,run['id'],run['manifest'],run['input'],output)
+        connection.execute('SELECT pg_advisory_xact_lock(701904)')
+        event = connection.execute('SELECT * FROM inbox WHERE event_id=%s FOR UPDATE',(output['event_id'],)).fetchone()
+        if not event or event['current_run_id'] != run['id']:
+            raise HTTPException(409,'Сообщение уже связано с другим запуском')
+        if output['action'] not in {'create','update'}:
+            return
+        task_id = 'TASK-' + event['event_id'] if output['action']=='create' else output['task_id']
+        previous = connection.execute('SELECT * FROM tasks WHERE id=%s FOR UPDATE',(task_id,)).fetchone()
+        if output['action']=='create' and previous:
+            raise HTTPException(409,'Задача этого сообщения уже существует; повтор не применён')
+        if output['action']=='create':
+            now_tasks=connection.execute('SELECT id,version FROM tasks WHERE project_id=%s ORDER BY id FOR UPDATE',(output['project_id'],)).fetchall()
+            before_tasks=sorted((t['id'],t['version']) for t in run['manifest']['_workspace']['tasks'])
+            if [(t['id'],t['version']) for t in now_tasks]!=before_tasks:
+                raise HTTPException(409,'Доска проекта изменилась после подготовки новой задачи. Нужен новый разбор, чтобы не создать повтор.')
+            normalized=' '.join(output['title'].casefold().split())
+            if any(' '.join(t['title'].casefold().split())==normalized for t in run['manifest']['_workspace']['tasks']):
+                raise HTTPException(409,'На доске уже есть задача с таким результатом. Проверьте возможный повтор.')
+        if output['action']=='update' and (previous is None or previous['version'] != output['base_version']):
+            raise HTTPException(409,'Задача изменилась после подготовки результата. Нужен новый запуск по новому сообщению.')
+        new_version = previous['version']+1 if previous else 1
+        values=(output['title'],output['owner'],output['status'],output['due_date'],output['blocked_by'],Jsonb(output['source_refs']))
+        if previous:
+            task = connection.execute('UPDATE tasks SET title=%s,owner=%s,status=%s,due_date=%s,blocked_by=%s,source_refs=%s,version=%s,updated_at=now() WHERE id=%s RETURNING *',values+(new_version,task_id)).fetchone()
+        else:
+            task = connection.execute('INSERT INTO tasks(title,owner,status,due_date,blocked_by,source_refs,id,project_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *',values+(task_id,output['project_id'])).fetchone()
+        connection.execute('INSERT INTO task_history(task_id,version,snapshot,author,run_id,run_version) VALUES(%s,%s,%s,%s,%s,%s)',(task_id,new_version,Jsonb(jsonable_encoder(task)),current['id'],run['id'],version))
+
+    def worker_state():
+        with db() as connection:
+            worker = connection.execute("SELECT provider,last_seen,last_seen>now()-interval '45 seconds' AS connected FROM cli_workers ORDER BY last_seen DESC LIMIT 1").fetchone()
+        return jsonable_encoder(worker or {'provider':settings.cli_provider,'last_seen':None,'connected':False})
+
+    def worker_auth(request: Request):
+        expected = settings.cli_worker_token
+        actual = request.headers.get('authorization','')
+        if len(expected) < 32 or not actual.startswith('Bearer ') or not secrets.compare_digest(actual[7:].encode(),expected.encode()):
+            raise HTTPException(401,'Нужен служебный токен локального исполнителя CLI')
+
+    @app.post('/api/cli/heartbeat', dependencies=[Depends(worker_auth)])
+    def heartbeat(body: WorkerBody):
+        if body.provider != settings.cli_provider:
+            raise HTTPException(409,'Выбран другой CLI; проверьте CLI_PROVIDER')
+        with db() as connection:
+            connection.execute('INSERT INTO cli_workers(worker_id,provider) VALUES(%s,%s) ON CONFLICT(worker_id) DO UPDATE SET provider=excluded.provider,last_seen=now()',(body.worker_id,body.provider))
+        return {'status':'ok'}
+
+    @app.post('/api/cli/claim', dependencies=[Depends(worker_auth)])
+    def claim_job(body: WorkerBody):
+        heartbeat(body)
+        with db() as connection:
+            row = connection.execute("SELECT j.* FROM cli_jobs j JOIN runs r ON r.id=j.run_id WHERE j.status='queued' AND r.status='running' ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1").fetchone()
+            if not row:
+                return {'job':None}
+            token = secrets.token_urlsafe(32)
+            connection.execute("UPDATE cli_jobs SET status='claimed',worker_id=%s,claim_hash=%s,claimed_at=now() WHERE id=%s",(body.worker_id,hashlib.sha256(token.encode()).hexdigest(),row['id']))
+            return {'job':{'id':str(row['id']),'claim_token':token,'request':row['request']}}
+
+    @app.post('/api/cli/jobs/{job_id}/complete', dependencies=[Depends(worker_auth)])
+    def complete_job(job_id: uuid.UUID, body: WorkerCompleteBody):
+        with db() as connection:
+            row = connection.execute('SELECT * FROM cli_jobs WHERE id=%s FOR UPDATE',(job_id,)).fetchone()
+            if not row or not row['claim_hash'] or not secrets.compare_digest(row['claim_hash'],hashlib.sha256(body.claim_token.encode()).hexdigest()):
+                raise HTTPException(404,'Задание не найдено')
+            if row['status'] == 'completed' and body.status == 'completed' and body.result:
+                repeated=body.result.model_dump();repeated['cost_usd']=None;repeated['mode']='cli'
+                if row['result']==repeated:return {'status':'ok'}
+            if row['status'] == 'error' and body.status == 'error' and row['finished_at']:
+                return {'status':'ok'}
+            if row['status'] != 'claimed':
+                raise HTTPException(409,'Задание уже завершено или отменено; повтор не принят')
+            if (datetime.now(timezone.utc)-row['claimed_at']).total_seconds()>210:
+                raise HTTPException(409,'Истёк срок задания; поздний ответ не принят')
+            if body.status == 'completed':
+                if body.result is None or not body.result.text.strip() or body.result.provider != settings.cli_provider:
+                    raise HTTPException(422,'Некорректный результат CLI')
+                result=body.result.model_dump();result['cost_usd']=None;result['mode']='cli'
+                encoded=json.dumps(result,ensure_ascii=False)
+                if settings.cli_worker_token in encoded:
+                    raise HTTPException(422,'Служебные данные не принимаются в результат')
+                connection.execute("UPDATE cli_jobs SET status='completed',result=%s,finished_at=now(),request='{}' WHERE id=%s",(Jsonb(result),job_id))
+            else:
+                connection.execute("UPDATE cli_jobs SET status='error',error='CLI не завершил запрос. Проверьте авторизацию и доступность выбранного CLI; повторного вызова не было.',finished_at=now(),request='{}' WHERE id=%s",(job_id,))
+        return {'status':'ok'}
+
+    @app.get('/api/workspace')
+    def workspace(current=Depends(person)):
+        with db() as connection:
+            snapshot=workspace_snapshot(connection,current['role'])
+            for task in snapshot['tasks']:
+                task['history']=jsonable_encoder(connection.execute('SELECT version,author,created_at,run_id,run_version,snapshot FROM task_history WHERE task_id=%s ORDER BY version',(task['id'],)).fetchall())
+            # IDs of somebody else's private run are not exposed in the shared inbox.
+            for event in snapshot['inbox']:
+                if event['run_id'] and current['role']!='ceo':
+                    owner=connection.execute('SELECT person_id FROM runs WHERE id=%s',(event['run_id'],)).fetchone()
+                    if owner['person_id']!=current['id']:event['run_id']=None
+            counts={'pending_approvals':sum(e['status']=='needs_review' for e in snapshot['inbox']),'blocked_tasks':sum(t['status']=='blocked' for t in snapshot['tasks']),'unprocessed_events':sum(e['status']=='new' for e in snapshot['inbox']),'open_questions':0}
+            if snapshot['projects']:
+                counts['open_questions']=connection.execute("SELECT count(*) AS n FROM inbox i JOIN runs r ON r.id=i.current_run_id JOIN revisions v ON v.run_id=r.id AND v.version=r.current_version WHERE i.project_id=ANY(%s) AND r.status='needs_review' AND v.output->>'action'='question'",([p['data']['project_id'] for p in snapshot['projects']],)).fetchone()['n']
+            return {'access':bool(snapshot['projects']),'inbox':snapshot['inbox'],'tasks':snapshot['tasks'],'projects':snapshot['projects'],'attention':counts}
+
+    @app.post('/api/inbox')
+    def add_event(body: InboxBody, current=Depends(person)):
+        if current['role'] not in {'ceo','sales'}:
+            raise HTTPException(403,'Добавлять сообщения может координатор или руководитель')
+        with db() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(701903)")
+            allowed={p['data'].get('project_id') for p in query_context(connection,current['role'],'projects')['records']}
+            if body.project_id not in allowed:raise HTTPException(403,'Проект недоступен')
+            values=body.model_dump(mode='json');fingerprint=canonical_hash(values)
+            old=connection.execute('SELECT input_hash FROM inbox WHERE event_id=%s',(body.event_id,)).fetchone()
+            if old and old['input_hash']!=fingerprint:raise HTTPException(409,'event_id уже обозначает другое сообщение')
+            connection.execute('INSERT INTO inbox(event_id,project_id,text,author,received_at,input_hash) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(event_id) DO NOTHING',(body.event_id,body.project_id,body.text,body.author,body.received_at,fingerprint))
+        return {'event_id':body.event_id,'created':not bool(old)}
+
+    @app.get('/internal/workspace')
+    def internal_workspace(run=Depends(run_token)):
+        if not run['manifest'].get('workspace',False):
+            raise HTTPException(403,'Агент не объявил чтение рабочего состояния')
+        snapshot = run['manifest'].get('_workspace',{})
+        context = snapshot.get('_project_context',{})
+        if context.get('enabled'):
+            # Record exactly the source versions in the issued run snapshot.
+            # Re-reading current knowledge here would conceal a concurrent sync.
+            references = [{'id':p['id'],'title':p['title'],'version':p['version']} for p in snapshot.get('projects',[])]
+            with db() as connection:
+                connection.execute('INSERT INTO context_events(run_id,section,query,records,hidden_count) VALUES(%s,%s,%s,%s,%s)',(run['id'],'projects','Снимок рабочего состояния',Jsonb(references),context.get('hidden_count',0)))
+        return {key:value for key,value in snapshot.items() if not key.startswith('_')}
+
+    @app.get('/internal/skills')
+    def internal_skills(run=Depends(run_token)):
+        return {'skills':run['manifest'].get('_available_skills',[])}
+
     @app.get("/api/health")
     def health():
         try:
             with db() as connection:
                 connection.execute("SELECT 1")
-            return {"status": "ok", "database": "ok", "llm_mode": settings.llm_mode}
+            return {"status": "ok", "database": "ok", "llm_mode": settings.llm_mode, "cli_worker": worker_state(), "cli_provider": settings.cli_provider}
         except psycopg.Error:
-            return JSONResponse({"status": "error", "database": "unavailable", "llm_mode": settings.llm_mode}, status_code=503)
+            return JSONResponse({"status": "error", "database": "unavailable", "llm_mode": settings.llm_mode, "cli_worker": worker_state(), "cli_provider": settings.cli_provider}, status_code=503)
 
     @app.get("/api/bootstrap")
     def bootstrap(current=Depends(person)):
@@ -490,10 +736,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 coalesce(sum(input_tokens),0) AS input_tokens,coalesce(sum(output_tokens),0) AS output_tokens,
                 CASE WHEN count(*) FILTER(WHERE cost_usd IS NULL)>0 THEN NULL ELSE sum(cost_usd) END AS cost_usd
                 FROM runs""" + filter_sql + " GROUP BY agent", () if current["role"] == "ceo" else (current["id"],)).fetchall()}
-        return {"demo": settings.auth_mode == "demo", "llm_mode": settings.llm_mode,
+        return {"demo": settings.auth_mode == "demo", "llm_mode": settings.llm_mode, "cli_worker": worker_state(),
             "person": current, "people": config["people"] if settings.auth_mode == "demo" else [current],
             "roles": config["roles"], "agents": [{**manifest, "allowed": current["role"] in manifest["roles"], "metrics": metrics.get(manifest["name"], {"runs": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0})} for manifest in config["agents"].values()],
-            "sections": sections, "skills": config["skills"], "process": config["process"],
+            "sections": sections, "skills": [s for s in config["skills"] if current["role"] in s["roles"]], "process": config["process"],
             "policies": {"approval": "Руководитель утверждает точную версию. Правка требует нового решения.",
                 "sending": "Внешняя отправка не подключена.", "network": "Агенты обращаются только к платформе в своей внутренней сети.",
                 "auth": "Переключатель сотрудника демонстрирует роли и не проверяет личность." if settings.auth_mode == "demo" else "Личность определяется личным токеном."},
@@ -531,26 +777,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/runs")
     def start_run(body: RunBody, current=Depends(person)):
+        feedback=body.retry_reason.strip()
+        if (body.refresh or feedback) and body.agent != "task-intake":
+            raise HTTPException(422,"Повторный разбор сообщения доступен только процессу task-intake")
+        if feedback and (not body.refresh or len(feedback)<5):
+            raise HTTPException(422,"Для повторного разбора укажите refresh:true и замечание не короче пяти символов")
         manifest = config["agents"].get(body.agent)
         if manifest is None:
             raise HTTPException(404, "Агент не найден")
         if current["role"] not in manifest["roles"]:
             raise HTTPException(403, "Ваша роль не может запускать этого агента")
         schema_check(manifest["input"], body.input, "Вход агента")
+        if any(current["role"] not in s["roles"] for s in config["skills"] if s["name"] in manifest.get("skills", [])):
+            raise HTTPException(403,"Роль не может выполнять один из способов работы этого агента")
         runtime_manifest = {**manifest, "_skills": [s for s in config["skills"] if s["name"] in manifest.get("skills", [])]}
+        if body.agent == "work-assistant":
+            runtime_manifest["_available_skills"] = [s for s in config["skills"] if s["execution"] == "draft" and current["role"] in s["roles"]]
+            runtime_manifest["context"] = sorted(set(manifest["context"]) | {section for skill in runtime_manifest["_available_skills"] for section in skill["context"]})
         fingerprint = canonical_hash({"agent": body.agent, "input": body.input})
         run_id, token = uuid.uuid4(), secrets.token_urlsafe(48)
         with db() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(701902)")
+            repeated=connection.execute("SELECT * FROM runs WHERE person_id=%s AND request_id=%s", (current["id"],body.request_id)).fetchone()
+            if repeated:
+                if repeated["input_hash"] != fingerprint:
+                    raise HTTPException(409,"Этот request_id уже использован с другим входом")
+                return full_run(connection,repeated)
+            snapshot = workspace_snapshot(connection, current["role"], body.input.get("project_id", "all"), body.input.get("event_id"), runtime_manifest["context"]) if runtime_manifest.get("workspace",False) else {}
+            if feedback:
+                runtime_manifest["_retry_reason"] = feedback
+                snapshot["review_feedback"] = feedback
+            runtime_manifest["_workspace"] = snapshot
+            if body.agent == "task-intake":
+                event = snapshot["event"]
+                if event is None:
+                    raise HTTPException(404, "Сообщение не найдено в доступном проекте")
+                if event.get("current_run_id"):
+                    previous = permitted_run(connection, event["current_run_id"], current, lock=True)
+                    if previous["status"] != "error":
+                        if body.refresh:
+                            if previous["status"] != "needs_review" or not (feedback or source_warnings(connection,previous["id"]) or task_state_stale(connection,previous)):
+                                raise HTTPException(409,"Повторить можно только несогласованный разбор: укажите замечание проверяющего или сначала обновите изменившиеся источники и задачи")
+                        else:
+                            return full_run(connection, previous)
             inserted = connection.execute("""INSERT INTO runs
                 (id,agent,person_id,role,status,input,input_hash,request_id,manifest,llm_mode,cost_usd)
                 VALUES (%s,%s,%s,%s,'running',%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (person_id,request_id) DO NOTHING RETURNING id""",
-                (run_id, body.agent, current["id"], current["role"], Jsonb(body.input), fingerprint, body.request_id, Jsonb(runtime_manifest), settings.llm_mode, 0 if settings.llm_mode == "demo" or (settings.input_price is not None and settings.output_price is not None) else None)).fetchone()
+                (run_id, body.agent, current["id"], current["role"], Jsonb(body.input), fingerprint, body.request_id, Jsonb(runtime_manifest), settings.llm_mode, 0 if settings.llm_mode == "fixture" else None)).fetchone()
             if not inserted:
                 previous = connection.execute("SELECT * FROM runs WHERE person_id=%s AND request_id=%s", (current["id"], body.request_id)).fetchone()
                 if previous["input_hash"] != fingerprint:
                     raise HTTPException(409, "Этот request_id уже использован с другим входом. Создайте новый идентификатор.")
                 return full_run(connection, previous)
+            if body.agent == "task-intake":
+                connection.execute("UPDATE inbox SET current_run_id=%s WHERE event_id=%s", (run_id, body.input["event_id"]))
             connection.execute("INSERT INTO run_tokens(token_hash,run_id,expires_at) VALUES (%s,%s,now()+interval '15 minutes')", (hashlib.sha256(token.encode()).hexdigest(), run_id))
         started = time.monotonic()
         output, steps, error = None, [], None
@@ -561,17 +842,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with httpx.Client(timeout=settings.agent_timeout, trust_env=False, follow_redirects=False) as client:
                 response = client.post(endpoint.rstrip("/") + "/run", json={"input": body.input, "run_token": token, "platform_url": settings.platform_url})
             if response.status_code != 200:
-                safe_errors = {
-                    "client_not_found": "Клиент не найден в доступных знаниях. Проверьте имя в разделе «Знания».",
-                    "Клиент не найден в доступных знаниях. Проверьте имя в разделе «Знания».": "Клиент не найден в доступных знаниях. Проверьте имя в разделе «Знания».",
-                    "Клиент не найден. Добавьте запись о клиенте и синхронизируйте знания.": "Клиент не найден. Добавьте запись о клиенте и синхронизируйте знания.",
-                    "Модель вернула непонятный список услуг. Расчёт остановлен.": "Модель вернула непонятный список услуг. Расчёт остановлен.",
-                    "Нужен непустой список идентификаторов услуг.": "Нужен непустой список идентификаторов услуг.",
-                    "Нет подходящей услуги в каталоге. Уточните задачу или добавьте услугу.": "Нет подходящей услуги в каталоге. Уточните задачу или добавьте услугу.",
-                    "Модель выбрала неизвестную или повторяющуюся услугу. Расчёт остановлен.": "Модель выбрала неизвестную или повторяющуюся услугу. Расчёт остановлен.",
-                    "model_unavailable": "Модель недоступна. Проверьте ANTHROPIC_API_KEY, ANTHROPIC_MODEL и баланс провайдера.",
-                    "invalid_selection": "Модель выбрала услуги, которых нет в доступном прайсе. Требуется проверка человеком.",
-                }
+                safe_messages = [
+                    "Модель вернула предложение не по схеме. Изменения не применены.",
+                    "Модель сослалась на источник, который не получала.",
+                    "Модель выбрала неизвестного ответственного.",
+                    "Обновление не ссылается на точную существующую задачу.",
+                    "Не хватает разрешённых сведений проекта или правил.",
+                    "Скилл не найден или недоступен роли.",
+                    "Результат скилла не прошёл проверку формата, источников или маршрута.",
+                    "Сводка не соответствует формату или содержит неизвестные источники.",
+                    "Локальный исполнитель CLI не подключён. Выполните python3 scripts/start.py и проверьте вход в выбранный CLI.",
+                    "CLI не завершил запрос. Проверьте авторизацию и доступность выбранного CLI; повторного вызова не было.",
+                    "CLI не ответил вовремя. Автоматического повторного вызова не было; проверьте локальный исполнитель.",
+                    "CLI вернул ответ не по ожидаемой схеме. Изменения не применены.",
+                ]
+                safe_errors = {message: message for message in safe_messages}
                 try:
                     detail = response.json().get("detail")
                     if isinstance(detail, dict):
@@ -588,9 +873,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(502, "Ответ агента должен содержать только output и steps")
             output, steps = result["output"], result["steps"]
             schema_check(manifest["output"], output, "Выход агента")
+            with db() as connection:
+                validate_output(connection, run_id, runtime_manifest, body.input, output)
             schema_check({"type": "array", "maxItems": 50, "items": {"type": "object", "required": ["title", "detail"], "properties": {"title": {"type": "string", "maxLength": 200}, "detail": {"type": "string", "maxLength": 5000}}, "additionalProperties": False}}, steps, "Шаги агента")
             # Guard against accidental token echoes in code supplied by learners.
-            if token in json.dumps(result, ensure_ascii=False) or (settings.anthropic_api_key and settings.anthropic_api_key in json.dumps(result, ensure_ascii=False)):
+            if token in json.dumps(result, ensure_ascii=False) or (settings.cli_worker_token and settings.cli_worker_token in json.dumps(result, ensure_ascii=False)):
                 raise HTTPException(502, "Ответ агента содержит служебные данные и не сохранён")
         except HTTPException as exc:
             error = str(exc.detail)
@@ -614,6 +901,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def revise(run_id: str, body: RevisionBody, current=Depends(person)):
         with db() as connection:
             row = permitted_run(connection, run_id, current, lock=True)
+            if row["agent"] == "task-intake" and row["status"] == "approved":
+                raise HTTPException(409, "Решение уже применено. Для продолжения добавьте новое сообщение; историю не переписываем.")
             if row["status"] not in {"needs_review", "approved"}:
                 raise HTTPException(409, "Редактировать можно только готовый результат")
             if row["current_version"] != body.base_version:
@@ -642,6 +931,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if prior and prior["note"] != body.note:
                 raise HTTPException(409, "Решение по этой версии уже сохранено. История решений неизменяема.")
             if not prior:
+                apply_task_change(connection, row, body.version, current)
                 connection.execute("INSERT INTO decisions(run_id,version,author,note) VALUES (%s,%s,%s,%s)", (row["id"], body.version, current["id"], body.note))
             row = connection.execute("UPDATE runs SET status='approved' WHERE id=%s RETURNING *", (row["id"],)).fetchone()
             return full_run(connection, row)
@@ -677,81 +967,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connection.execute("INSERT INTO context_events(run_id,section,query,records,hidden_count) VALUES (%s,%s,%s,%s,%s)", (run["id"], section, q, Jsonb(references), result["hidden_count"]))
             return result
 
-    @app.post("/internal/llm")
+    @app.post('/internal/llm')
     def llm(body: LLMBody, run=Depends(run_token)):
-        try:
-            data_json = json.dumps(body.data, ensure_ascii=False, allow_nan=False)
-        except (TypeError, ValueError):
-            raise HTTPException(422, "Данные модели должны быть корректным JSON без NaN и Infinity") from None
-        if len(data_json) > 200000:
-            raise HTTPException(413, "Слишком большой контекст модели")
-        skills = run["manifest"].get("_skills", [])
-        skill_refs = [{"name": s["name"], "version": s["version"]} for s in skills]
-        model = "demo-deterministic" if settings.llm_mode == "demo" else settings.anthropic_model
-        # Reserve a call while locking the run. Failed requests also use the budget.
+        data_json=json.dumps(body.data,ensure_ascii=False,allow_nan=False)
+        if len(data_json)>200000:raise HTTPException(413,'Слишком большой контекст модели')
+        if body.response_schema is not None:
+            try:Draft202012Validator.check_schema(body.response_schema)
+            except SchemaError:raise HTTPException(422,'Некорректная схема ответа модели') from None
+        skills=run['manifest'].get('_skills',[])
+        if body.skill_name:
+            skills=[s for s in run['manifest'].get('_available_skills',[]) if s['name']==body.skill_name]
+            if not skills:raise HTTPException(403,'Скилл не разрешён для этого запуска')
+        skill_refs=[{'name':s['name'],'version':s['version']} for s in skills]
+        model='fixture-test-only' if settings.llm_mode=='fixture' else settings.cli_provider
         with db() as connection:
-            latest = connection.execute("SELECT status FROM runs WHERE id=%s FOR UPDATE", (run["id"],)).fetchone()
-            if latest["status"] != "running":
-                raise HTTPException(401, "Запуск уже завершён")
-            calls = connection.execute("SELECT count(*) AS n FROM model_calls WHERE run_id=%s", (run["id"],)).fetchone()["n"]
-            if calls >= 6:
-                raise HTTPException(429, "Лимит: не более шести обращений к модели на запуск")
-            call_id = connection.execute("INSERT INTO model_calls(run_id,purpose,mode,model,input_tokens,output_tokens,cost_usd,skill_refs,status) VALUES (%s,%s,%s,%s,0,0,%s,%s,'running') RETURNING id",
-                (run["id"], body.purpose, settings.llm_mode, model, 0 if settings.llm_mode == "demo" else None, Jsonb(skill_refs))).fetchone()["id"]
-        result = None
-        def record_usage(result, status):
-            with db() as connection:
-                connection.execute("UPDATE model_calls SET model=%s,input_tokens=%s,output_tokens=%s,cost_usd=%s,status=%s,usage=%s WHERE id=%s", (result["model"], result["input_tokens"], result["output_tokens"], result["cost_usd"], status, Jsonb(result.get("usage", {})), call_id))
-                connection.execute("""UPDATE runs SET input_tokens=input_tokens+%s,output_tokens=output_tokens+%s,
-                    cost_usd=CASE WHEN cost_usd IS NULL OR %s::numeric IS NULL THEN NULL ELSE cost_usd+%s END WHERE id=%s""", (result["input_tokens"], result["output_tokens"], result["cost_usd"], result["cost_usd"], run["id"]))
-
+            latest=connection.execute('SELECT status FROM runs WHERE id=%s FOR UPDATE',(run['id'],)).fetchone()
+            if latest['status']!='running':raise HTTPException(401,'Запуск уже завершён')
+            calls=connection.execute('SELECT count(*) AS n FROM model_calls WHERE run_id=%s',(run['id'],)).fetchone()['n']
+            if calls>=6:raise HTTPException(429,'Лимит: не более шести обращений к модели на запуск')
+            call_id=connection.execute("INSERT INTO model_calls(run_id,purpose,mode,model,input_tokens,output_tokens,cost_usd,skill_refs,status) VALUES(%s,%s,%s,%s,0,0,%s,%s,'running') RETURNING id",(run['id'],body.purpose,settings.llm_mode,model,0 if settings.llm_mode=='fixture' else None,Jsonb(skill_refs))).fetchone()['id']
+        result=None;job_id=None
         try:
-            if settings.llm_mode == "demo":
-                try:
-                    text = demo_response(body)
-                except (TypeError, KeyError, AttributeError):
-                    raise HTTPException(422, "Проверьте data для демонстрационного ответа модели") from None
-                result = {"text": text, "mode": "demo", "model": model, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0}
+            if settings.llm_mode=='fixture':
+                result={'text':fixture_response(body),'mode':'fixture','model':model,'input_tokens':0,'output_tokens':0,'cost_usd':0,'usage':{'fixture':True}}
             else:
-                if not settings.anthropic_api_key:
-                    raise HTTPException(503, "Для настоящей модели заполните ANTHROPIC_API_KEY на платформе")
-                if not settings.anthropic_model:
-                    raise HTTPException(503, "Для настоящей модели заполните ANTHROPIC_MODEL на платформе")
-                system = "\n\n".join(["Способы работы платформы:\n" + "\n\n".join(s["content"] for s in skills), body.system]) if skills else body.system
-                try:
-                    response = httpx.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": settings.anthropic_api_key, "anthropic-version": "2023-06-01"}, json={"model": model, "max_tokens": body.max_tokens, "system": system, "messages": [{"role": "user", "content": body.prompt + "\n\nДанные:\n" + json.dumps(body.data, ensure_ascii=False)}]}, timeout=60, follow_redirects=False, trust_env=False)
-                    if response.status_code != 200:
-                        raise HTTPException(502, "Провайдер модели отклонил запрос. Проверьте ключ, модель и баланс. Демонстрационный ответ не подставлялся.")
-                    payload = response.json()
-                    usage = payload["usage"]
-                    uncached, tokens_out = int(usage["input_tokens"]), int(usage["output_tokens"])
-                    cache_read = int(usage.get("cache_read_input_tokens", 0))
-                    cache_write = int(usage.get("cache_creation_input_tokens", 0))
-                    tokens_in = uncached + cache_read + cache_write
-                    if min(uncached, tokens_out, cache_read, cache_write) < 0:
-                        raise ValueError("usage")
-                    cost = None
-                    if settings.input_price is not None and settings.output_price is not None and not cache_read and not cache_write:
-                        cost = (Decimal(tokens_in)*Decimal(settings.input_price) + Decimal(tokens_out)*Decimal(settings.output_price)) / 1000000
-                    result = {"text": "", "mode": "anthropic", "model": payload.get("model", model), "input_tokens": tokens_in, "output_tokens": tokens_out, "cost_usd": cost, "usage": {"input_tokens": uncached, "output_tokens": tokens_out, "cache_read_input_tokens": cache_read, "cache_creation_input_tokens": cache_write}}
-                    if payload.get("stop_reason") == "max_tokens":
-                        raise HTTPException(502, "Модель не завершила ответ: достигнут лимит токенов. Неполный результат не принят.")
-                    result["text"] = "\n".join(block["text"] for block in payload["content"] if block.get("type") == "text")
-                    if not result["text"].strip():
-                        raise HTTPException(502, "Модель не вернула текстовый ответ")
-                except (httpx.HTTPError, ValueError, TypeError, KeyError):
-                    raise HTTPException(502, "Не удалось получить ответ модели. Демонстрационный ответ не подставлялся.") from None
-        except Exception:
-            if result is not None:
-                record_usage(result, "error")
-            else:
+                if len(settings.cli_worker_token)<32 or not worker_state()['connected']:
+                    raise HTTPException(503,'Локальный исполнитель CLI не подключён. Выполните python3 scripts/start.py и проверьте вход в выбранный CLI.')
+                system='\n\n'.join(['Способы работы платформы:\n'+'\n\n'.join(s['content'] for s in skills),body.system]) if skills else body.system
+                request={'purpose':body.purpose,'system':system,'prompt':body.prompt,'data':body.data,'max_tokens':body.max_tokens,'response_schema':body.response_schema}
+                job_id=uuid.uuid4()
                 with db() as connection:
-                    connection.execute("UPDATE model_calls SET status='error' WHERE id=%s", (call_id,))
-                    if settings.llm_mode == "anthropic":
-                        connection.execute("UPDATE runs SET cost_usd=NULL WHERE id=%s", (run["id"],))
+                    connection.execute("INSERT INTO cli_jobs(id,call_id,run_id,request,status) VALUES(%s,%s,%s,%s,'queued')",(job_id,call_id,run['id'],Jsonb(request)))
+                deadline=time.monotonic()+210
+                while time.monotonic()<deadline:
+                    with db() as connection:
+                        job=connection.execute('SELECT status,result,error FROM cli_jobs WHERE id=%s',(job_id,)).fetchone()
+                    if job['status']=='completed':result=job['result'];break
+                    if job['status']=='error':raise HTTPException(502,job['error'])
+                    time.sleep(.3)
+                if result is None:raise HTTPException(504,'CLI не ответил вовремя. Автоматического повторного вызова не было; проверьте локальный исполнитель.')
+                if body.response_schema:
+                    try:
+                        value=json.loads(result['text']);Draft202012Validator(body.response_schema).validate(value)
+                    except (ValueError,ValidationError,TypeError):
+                        raise HTTPException(502,'CLI вернул ответ не по ожидаемой схеме. Изменения не применены.') from None
+        except Exception:
+            with db() as connection:
+                if result is not None:
+                    connection.execute("UPDATE model_calls SET status='error',model=%s,input_tokens=%s,output_tokens=%s,cost_usd=%s,usage=%s WHERE id=%s",(result['model'],result['input_tokens'],result['output_tokens'],result['cost_usd'],Jsonb({**result.get('usage',{}), **({'provider':result['provider']} if 'provider' in result else {})}),call_id))
+                    connection.execute('UPDATE runs SET input_tokens=input_tokens+%s,output_tokens=output_tokens+%s,cost_usd=%s WHERE id=%s',(result['input_tokens'],result['output_tokens'],0 if settings.llm_mode=='fixture' else None,run['id']))
+                else:
+                    connection.execute("UPDATE model_calls SET status='error' WHERE id=%s",(call_id,))
+                if job_id:
+                    connection.execute("UPDATE cli_jobs SET status='error',error='Обращение к CLI отменено или завершилось ошибкой',finished_at=now(),request='{}' WHERE id=%s AND status IN ('queued','claimed')",(job_id,))
             raise
-        record_usage(result, "completed")
-        return jsonable_encoder(result)
+        with db() as connection:
+            connection.execute('UPDATE model_calls SET model=%s,input_tokens=%s,output_tokens=%s,cost_usd=%s,status=%s,usage=%s WHERE id=%s',(result['model'],result['input_tokens'],result['output_tokens'],result['cost_usd'],'completed',Jsonb({**result.get('usage',{}), **({'provider':result['provider']} if 'provider' in result else {})}),call_id))
+            connection.execute('UPDATE runs SET input_tokens=input_tokens+%s,output_tokens=output_tokens+%s,cost_usd=%s WHERE id=%s',(result['input_tokens'],result['output_tokens'],0 if settings.llm_mode=='fixture' else None,run['id']))
+        return result
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

@@ -1,20 +1,30 @@
 ceo:
   title: Руководитель
-  description: Отвечает за результат, управляет знаниями и утверждает предложения.
-  sections: [services, costs, cases, clients, templates, technical]
+  description: Видит все сведения и утверждает точные изменения задач.
+  sections:
+  - projects
+  - rules
+  - finance
   can_approve: true
 sales:
-  title: Продажи
-  description: Готовит справки и предложения; видит цены, но не себестоимость.
-  sections: [services, cases, clients, templates]
+  title: Координатор проектов
+  description: Разбирает сообщения, предлагает задачи и читает сводку; не видит внутренние
+    финансовые сведения.
+  sections:
+  - projects
+  - rules
   can_approve: false
 delivery:
   title: Исполнение
-  description: Изучает клиентов, кейсы и технические условия; не запускает расчёт предложения.
-  sections: [cases, clients, technical]
+  description: Читает проекты и задачи, запускает сводку; не меняет обязательства
+    команды.
+  sections:
+  - projects
+  - rules
   can_approve: false
 finance:
   title: Финансы
-  description: Проверяет цены и себестоимость; не утверждает коммерческие обещания.
-  sections: [services, costs]
+  description: Читает внутренние финансовые сведения; не разбирает сообщения проектов.
+  sections:
+  - finance
   can_approve: false

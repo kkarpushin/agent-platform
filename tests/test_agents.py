@@ -1,50 +1,20 @@
-"""Чистые тесты бизнес-правил: деньги, неизвестные услуги, отсутствие клиента."""
-import importlib.util
-import json
+"""Unit rules for model suggestions; no real model is called here."""
+import importlib.util,json
 from pathlib import Path
-
 import pytest
+ROOT=Path(__file__).resolve().parents[1]
+spec=importlib.util.spec_from_file_location('intake',ROOT/'agents/task-intake/agent.py');intake=importlib.util.module_from_spec(spec);spec.loader.exec_module(intake)
 
-ROOT = Path(__file__).resolve().parents[1]
+def proposal():return {'markdown':'Предложение','action':'create','event_id':'E001','project_id':'P01','task_id':None,'base_version':None,'title':'Получить тексты','owner':'mark','status':'blocked','due_date':None,'blocked_by':'Нет текстов','question':'','source_refs':['P01']}
 
+@pytest.mark.parametrize('change',[{'owner':'unknown'},{'source_refs':['PRIVATE']},{'event_id':'E002'},{'project_id':'P02'},{'due_date':'2026-99-99'},{'action':'update','task_id':'missing','base_version':1},{'action':'create','task_id':'T1'},{'title':''},{'action':'question','question':''}])
+def test_invalid_suggestion_rejected(change):
+    with pytest.raises(ValueError):intake.parse_proposal(json.dumps({**proposal(),**change}),{'event_id':'E001','project_id':'P01'},[],[{'id':'mark'}],['P01'])
 
-def module(name):
-    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), ROOT / 'agents' / name / 'agent.py')
-    loaded = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(loaded)
-    return loaded
-
-
-proposal = module('commercial-proposal')
-brief = module('client-brief')
-
-
-def test_money_is_decimal_and_duration_is_code():
-    assert proposal.calculate([{'price_usd': 0.1, 'days': 2}, {'price_usd': 0.2, 'days': 3}]) == (0.3, 5)
-
-
-@pytest.mark.parametrize('text', ['{}', '{"service_ids":[]}', '{"service_ids":["unknown"]}', '{"service_ids":["S01","S01"]}', '{"service_ids":"S01"}', 'не JSON'])
-def test_model_cannot_invent_or_repeat_services(text):
-    with pytest.raises(ValueError):
-        proposal.parse_selection(text, {'S01': {'price_usd': 1800, 'days': 5}})
-
-
-def test_structured_selection_uses_catalog_price():
-    selected = proposal.parse_selection('{"service_ids":["S01"],"price_usd":0}', {'S01': {'price_usd': 1800, 'days': 5}})
-    assert proposal.calculate(selected) == (1800, 5)
-
-
-def test_unknown_client_stops_before_model():
-    class Empty:
-        def search(self, section, query):
-            return []
-        def llm(self, *args):
-            pytest.fail('Unknown client must not consume model calls')
-    with pytest.raises(ValueError, match='Клиент не найден'):
-        proposal.app.agent_function({'client': 'нет'}, Empty())
-
+def test_existing_task_version_required():
+    p={**proposal(),'action':'update','task_id':'T1','base_version':2};t={'id':'T1','project_id':'P01','version':2}
+    assert intake.parse_proposal(json.dumps(p),{'event_id':'E001','project_id':'P01'},[t],[{'id':'mark'}],['P01'])==p
 
 def test_sdk_rejects_arbitrary_gateway():
     from sdk import Context
-    with pytest.raises(ValueError, match='Адрес платформы'):
-        Context('http://169.254.169.254', 'token')
+    with pytest.raises(ValueError):Context('http://169.254.169.254','token')

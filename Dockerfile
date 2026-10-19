@@ -11,5 +11,6 @@ COPY skills ./skills
 COPY processes ./processes
 COPY sdk ./sdk
 COPY tests ./tests
+COPY scripts ./scripts
 USER app
 CMD ["uvicorn", "app:app", "--app-dir", "/app/platform", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--no-proxy-headers"]

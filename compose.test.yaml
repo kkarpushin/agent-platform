@@ -3,11 +3,8 @@
 services:
   platform:
     environment:
-      LLM_MODE: demo
+      LLM_MODE: fixture
+      CLI_WORKER_TOKEN: ""
       AUTH_MODE: demo
-      ANTHROPIC_API_KEY: ""
-      ANTHROPIC_MODEL: ""
       PERSON_TOKENS: "{}"
-      INPUT_PRICE_PER_MILLION: ""
-      OUTPUT_PRICE_PER_MILLION: ""
     ports: !reset []

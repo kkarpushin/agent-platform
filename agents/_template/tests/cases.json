@@ -1,43 +1,31 @@
 [
   {
     "input": {
-      "client": "Орбита"
+      "project_id": "all"
     },
     "expect": {
       "contains": [
-        "Орбита",
-        "CL01"
-      ],
-      "sources": [
-        "CL01"
+        "Сводка"
       ]
     }
   },
   {
     "input": {
-      "client": "Контур"
+      "project_id": "P01"
     },
     "expect": {
       "contains": [
-        "Контур",
-        "CL02"
-      ],
-      "sources": [
-        "CL02"
+        "Сводка"
       ]
     }
   },
   {
     "input": {
-      "client": "Форма"
+      "project_id": "P02"
     },
     "expect": {
       "contains": [
-        "Форма",
-        "CL03"
-      ],
-      "sources": [
-        "CL03"
+        "Сводка"
       ]
     }
   }

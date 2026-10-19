@@ -6,4 +6,4 @@ test:
 stop:
 	docker compose stop
 logs:
-	docker compose logs --tail=80 platform client-brief commercial-proposal
+	docker compose logs --tail=80 platform task-intake daily-brief work-assistant

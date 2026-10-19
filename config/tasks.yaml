@@ -1,0 +1,18 @@
+- id: T001
+  project_id: P01
+  title: Подготовить и согласовать макеты Орбиты
+  owner: olga
+  status: done
+  due_date: '2026-10-19'
+  blocked_by: ''
+  source_refs:
+  - P01
+- id: T002
+  project_id: P02
+  title: Подготовить первые 12 контрольных вопросов Контура
+  owner: lev
+  status: done
+  due_date: '2026-10-19'
+  blocked_by: ''
+  source_refs:
+  - P02

@@ -1,56 +1,56 @@
-{
-  "name": "my-agent",
-  "version": "0.1.0",
-  "owner": "mark",
-  "description": "Замените описание задачей своего агента",
-  "context": [
-    "clients",
-    "cases"
-  ],
-  "roles": [
-    "ceo",
-    "sales",
-    "delivery"
-  ],
-  "input": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {
-      "client": {
-        "type": "string",
-        "title": "Клиент",
-        "description": "Имя из базы знаний, например Орбита",
-        "minLength": 1,
-        "maxLength": 100,
-        "default": "Орбита"
-      }
-    },
-    "required": [
-      "client"
-    ]
-  },
-  "output": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {
-      "markdown": {
-        "type": "string",
-        "maxLength": 50000
-      },
-      "client": {
-        "type": "string"
-      },
-      "sources": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        }
-      }
-    },
-    "required": [
-      "markdown",
-      "client",
-      "sources"
-    ]
-  }
-}
+name: daily-brief
+title: Сводка руководителя
+version: 0.2.0
+owner: anna
+description: Показывает задачи, препятствия и вопросы людям по общему состоянию.
+input:
+  type: object
+  additionalProperties: false
+  required:
+  - project_id
+  properties:
+    project_id:
+      type: string
+      title: Проект
+      enum:
+      - all
+      - P01
+      - P02
+      default: all
+output:
+  type: object
+  additionalProperties: false
+  required:
+  - markdown
+  - source_refs
+  - questions
+  properties:
+    markdown:
+      type: string
+      minLength: 1
+      maxLength: 20000
+    source_refs:
+      type: array
+      minItems: 1
+      maxItems: 20
+      uniqueItems: true
+      items:
+        type: string
+        maxLength: 80
+    questions:
+      type: array
+      maxItems: 20
+      items:
+        type: string
+        maxLength: 1000
+context:
+- projects
+- rules
+- finance
+roles:
+- ceo
+- sales
+- delivery
+skills:
+- daily-brief
+workspace: true

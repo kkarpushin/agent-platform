@@ -1780,3 +1780,121 @@ dialog .button {
     scroll-behavior: auto !important;
   }
 }
+
+/* Рабочий процесс: входящие, решения и общие задачи. */
+.workspace-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+  margin: 24px 0 34px;
+}
+.attention-card {
+  position: relative;
+  padding: 21px 19px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--white);
+}
+.attention-value { display: block; font-size: 33px; font-weight: 500; line-height: 1.2; margin-bottom: 12px; }
+.attention-icon { position: absolute; top: 21px; right: 19px; color: var(--sage-dark); font-size: 18px; }
+.attention-card h3 { font-size: 12px; }
+.attention-card p { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.workspace-columns { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(250px, 1fr); gap: 20px; align-items: start; margin-top: 25px; }
+.workspace-columns .section-title { margin-top: 0; align-items: flex-start; gap: 9px; flex-direction: column; }
+.inbox-message { padding: 23px 0; border-bottom: 1px solid var(--line); }
+.inbox-message:last-child { border-bottom: 0; padding-bottom: 0; }
+.inbox-message .card-top { align-items: flex-start; gap: 12px; }
+.inbox-message .eyebrow { font-size: 9px; letter-spacing: .8px; }
+.message-text { font-size: 15px; line-height: 1.65; margin-top: 13px; white-space: pre-line; }
+.message-meta { font-size: 10px; color: var(--muted); margin-top: 9px; }
+.message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 15px; }
+.message-actions .button { font-size: 11px; }
+.decision-item { border-top: 1px solid var(--line); padding: 17px 0; }
+.decision-item h3 { font-size: 14px; }
+.decision-item p { font-size: 11px; margin: 5px 0 12px; }
+.decision-queue .empty-state { padding: 30px 0 20px; text-align: left; border: 0; background: none; }
+.decision-queue .empty-state h3 { font-size: 15px; }
+.decision-queue .empty-state p { font-size: 12px; }
+.compact-flow { margin-top: 6px; }
+.task-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 16px; }
+.task-column { background: #e9ece3; border: 1px solid var(--line); border-radius: 15px; padding: 15px; min-width: 0; }
+.task-column-blocked { background: #f5e9dd; }
+.task-column-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin: 2px 2px 15px; }
+.task-column-title h3 { font-size: 13px; }
+.task-card { border: 1px solid var(--line); padding: 18px; border-radius: 11px; background: var(--white); margin-top: 12px; overflow-wrap: anywhere; }
+.task-card .eyebrow { font-size: 8px; letter-spacing: .7px; }
+.task-card h3 { margin: 9px 0 13px; font-size: 15px; line-height: 1.45; }
+.task-card p { font-size: 11px; margin-top: 8px; }
+.task-owner { font-weight: 600; }
+.task-blocker { border-left: 2px solid var(--coral); padding: 7px 0 7px 10px; color: #884d38; background: #fcf3ec; }
+.task-empty { font-size: 12px; padding: 10px 2px 17px; }
+.task-history { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; font-size: 10px; }
+.task-history summary { cursor: pointer; font-weight: 600; }
+.task-history .history-item { margin-top: 14px; padding-top: 12px; }
+.task-history .history-item strong { font-size: 10px; }
+.task-history small { font-size: 9px; }
+.task-history .button { padding: 6px 0; font-size: 10px; }
+.task-proposal { padding: 20px; border-radius: 12px; border: 1px solid #cfdac5; background: #eef3e9; margin: 20px 0 25px; }
+.task-proposal h3 { font-size: 20px; margin: 7px 0; }
+.proposal-title { font-size: 15px; font-weight: 600; }
+.proposal-facts { display: grid; grid-template-columns: minmax(100px, .8fr) minmax(0, 1.3fr); gap: 7px 20px; font-size: 11px; margin: 20px 0; }
+.proposal-facts dt { color: var(--muted); }
+.proposal-facts dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.cli-offline { border-color: #dec6b5; background: #fcf4e9; }
+.cli-offline .card-top { flex-wrap: wrap; gap: 12px; }
+.command-panel { margin: 0 0 28px; padding: 28px; background: var(--ink); color: var(--white); border: none; }
+.command-panel .eyebrow { color: #c2d0b8; }
+.command-panel h2 { font-size: 25px; margin: 10px 0; }
+.command-panel > p { color: #d2ddcb; font-size: 12px; max-width: 780px; }
+.command-panel form { margin-top: 22px; }
+.command-panel label { color: #f7f9f0; }
+.command-panel textarea { background: #fffefa; color: var(--ink); min-height: 100px; width: 100%; resize: vertical; }
+.command-panel .form-actions { margin-top: 12px; }
+.command-panel .field-hint { color: #d2ddcb; }
+.command-panel .button.primary { background: #e4eadb; color: var(--ink); border-color: #e4eadb; }
+.command-panel .form-error { color: #ffb9a9; }
+.command-examples { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; }
+.command-example { border: 1px solid #66816d; border-radius: 20px; padding: 6px 12px; color: #e4eadb; background: transparent; font-size: 10px; text-align: left; }
+.example-caption { margin-bottom: -8px; color: var(--muted); font-size: 11px; }
+@media (max-width: 1120px) {
+  .workspace-columns { grid-template-columns: 1fr; }
+  .task-board { gap: 10px; }
+  .task-column { padding: 10px; }
+  .task-card { padding: 13px; }
+  .attention-card { padding: 18px 14px; }
+  .attention-icon { right: 14px; top: 18px; }
+}
+@media (max-width: 760px) {
+  .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .task-board { grid-template-columns: 1fr; }
+  .task-card { padding: 18px; }
+  .task-column { padding: 15px; }
+  .command-panel { padding: 22px; }
+}
+@media (max-width: 640px) {
+  .workspace-summary { margin: 20px 0 27px; }
+  .attention-value { font-size: 28px; }
+  .attention-card h3 { font-size: 11px; }
+  .attention-card p { font-size: 10px; }
+  .workspace-columns { gap: 15px; }
+  .message-text { font-size: 13px; }
+  .inbox-message .card-top { flex-wrap: wrap; }
+  .inbox-message { padding: 20px 0; }
+  .proposal-facts { grid-template-columns: 1fr; gap: 2px; }
+  .proposal-facts dd { margin-bottom: 8px; }
+  .task-proposal { padding: 15px; }
+  .task-proposal h3 { font-size: 18px; }
+  .command-panel { padding: 20px; }
+  .command-panel h2 { font-size: 22px; }
+  .command-panel .form-actions { align-items: stretch; flex-direction: column; }
+}
+
+.command-skill-choice { margin-top: 16px; font-size: 11px; }
+.command-skill-choice summary { color: #d2ddcb; cursor: pointer; width: fit-content; }
+.command-skill-choice .field-label { margin-top: 15px; }
+.command-skill-choice select { max-width: 100%; min-width: min(330px, 100%); margin-top: 5px; font-size: 12px; }
+
+.proposal-retry > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.proposal-retry textarea { width: 100%; min-height: 110px; resize: vertical; }
+.proposal-retry .field-hint { margin: 10px 0 16px; }
+.proposal-retry .form-error:empty { display: none; }

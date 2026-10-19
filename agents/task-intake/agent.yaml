@@ -1,0 +1,107 @@
+name: task-intake
+title: Разбор сообщения
+version: 0.2.0
+owner: anna
+description: Из сообщения предлагает новую задачу, обновление, вопрос или отсутствие
+  действия. Доска меняется после Анны.
+input:
+  type: object
+  additionalProperties: false
+  required:
+  - event_id
+  properties:
+    event_id:
+      type: string
+      title: Идентификатор сообщения
+      minLength: 1
+      maxLength: 80
+      default: E001
+output:
+  type: object
+  additionalProperties: false
+  required:
+  - markdown
+  - action
+  - event_id
+  - project_id
+  - task_id
+  - base_version
+  - title
+  - owner
+  - status
+  - due_date
+  - blocked_by
+  - question
+  - source_refs
+  properties:
+    markdown:
+      type: string
+      minLength: 1
+      maxLength: 20000
+    action:
+      type: string
+      enum:
+      - create
+      - update
+      - question
+      - no_action
+    event_id:
+      type: string
+      maxLength: 80
+    project_id:
+      type: string
+      maxLength: 80
+    task_id:
+      type:
+      - string
+      - 'null'
+      maxLength: 100
+    base_version:
+      type:
+      - integer
+      - 'null'
+      minimum: 1
+    title:
+      type: string
+      maxLength: 300
+    owner:
+      type:
+      - string
+      - 'null'
+      maxLength: 80
+    status:
+      type: string
+      enum:
+      - todo
+      - in_progress
+      - blocked
+      - done
+    due_date:
+      type:
+      - string
+      - 'null'
+      maxLength: 10
+    blocked_by:
+      type: string
+      maxLength: 2000
+    question:
+      type: string
+      maxLength: 2000
+    source_refs:
+      type: array
+      minItems: 1
+      maxItems: 20
+      uniqueItems: true
+      items:
+        type: string
+        maxLength: 80
+context:
+- projects
+- rules
+- finance
+roles:
+- ceo
+- sales
+skills:
+- task-intake
+workspace: true

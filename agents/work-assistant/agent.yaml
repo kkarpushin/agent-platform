@@ -1,0 +1,86 @@
+name: work-assistant
+title: Рабочий помощник
+version: 0.2.0
+owner: anna
+description: Принимает поручение, выбирает сохранённый способ работы и готовит результат
+  по доступным знаниям. Изменения предлагает отдельным маршрутом.
+input:
+  type: object
+  additionalProperties: false
+  required:
+  - request
+  - skill
+  - project_id
+  properties:
+    request:
+      type: string
+      title: Поручение системе
+      minLength: 5
+      maxLength: 10000
+      default: Объясни, как у нас сообщение становится задачей и кто утверждает изменение.
+    skill:
+      type: string
+      title: Способ работы или auto
+      default: auto
+      minLength: 1
+      maxLength: 80
+    project_id:
+      type: string
+      title: Проект
+      enum:
+      - all
+      - P01
+      - P02
+      default: all
+output:
+  type: object
+  properties:
+    markdown:
+      type: string
+      minLength: 1
+      maxLength: 20000
+    selected_skill:
+      type: string
+      maxLength: 80
+    source_refs:
+      type: array
+      items:
+        type: string
+      uniqueItems: true
+      maxItems: 50
+    suggested_agent:
+      type:
+      - string
+      - 'null'
+      enum:
+      - null
+      - task-intake
+      - daily-brief
+    suggested_input:
+      type: object
+      properties:
+        event_id:
+          type: string
+        project_id:
+          type: string
+      additionalProperties: false
+    missing_capability:
+      type: string
+      maxLength: 2000
+  required:
+  - markdown
+  - selected_skill
+  - source_refs
+  - suggested_agent
+  - suggested_input
+  - missing_capability
+  additionalProperties: false
+context:
+- projects
+- rules
+roles:
+- ceo
+- sales
+- delivery
+skills: []
+workspace: true
